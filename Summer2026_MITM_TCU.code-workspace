@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.tpp": "cpp",
+			"main - simple mqb mitmcpp": "c",
+			"random": "cpp",
+			"__locale": "cpp"
+		}
+	}
+}
