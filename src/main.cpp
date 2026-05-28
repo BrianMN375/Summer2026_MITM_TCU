@@ -1,129 +1,506 @@
+// =============================================================================
+// main.cpp
+//
+// Teensy 4.1
+// MQB A8 Full Logger + Discovery + Solver
+//
+// COMBINED FEATURES
+// -----------------
+//
+// 1. Live CAN RX
+// 2. 0xA8 checksum verification
+// 3. Full frame logger
+// 4. Unknown-state logger
+// 5. Session logfile generation
+// 6. Lookup solver
+// 7. Experimental brute-force architecture
+// 8. DBC decoding
+// 9. Live statistics
+// 10. Replay/learning support hooks
+//
+// =============================================================================
+
 #include <Arduino.h>
-#include "checksum.h"
-
+#include <SPI.h>
+#include <SD.h>
 #include <FlexCAN_T4.h>
-#include "global_vars.h"
-#include "Internal_Onboard_Functions.h"
 
+#include "a8_solver.h"
 
-CAN_message_t msg;  // global definition (resolves extern)
+// =============================================================================
+// CAN
+// =============================================================================
 
-// Forward declarations from can_mitm.cpp
-void can_setup();
-void loop_TFTCAN1_poll();
-void loop_TFTCAN2_poll();
-void loop_TFTCAN3_poll();
-void do_TFT_MITM_LC_BumpIn_Statuses();
-void reset_inverse_cache();  // from checksum.cpp
-void loop_SerialPrinting_MITM();
+static FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> CANbus;
 
-// Config
-static const uint32_t SERIAL_BAUD = 115200;
-static const uint32_t HEARTBEAT_MS = 1000;
+// =============================================================================
+// SD CONFIG
+// =============================================================================
 
-// Runtime state
-static uint32_t last_heartbeat = 0;
-static uint32_t last_serial_check = 0;
+#define A8_SESSION_LOGGING 1
 
-// Simple serial command handler
-static void handle_serial_commands() {
-  while (Serial.available()) {
-    String line = Serial.readStringUntil('\n');
-    line.trim();
-if (line.length() == 0) continue;
+char activeLogFilename[32];
+char unknownLogFilename[32];
 
-    if (line.equalsIgnoreCase("help")) {
-      Serial.println(F("Commands: help | stats | reset_cache"));
-    } else if (line.equalsIgnoreCase("stats")) {
-      Serial.println(F("Stats: not implemented (add counters in can_mitm.cpp)"));
-    } else if (line.equalsIgnoreCase("reset_cache")) {
-      Serial.println(F("Resetting inverse cache..."));
-      reset_inverse_cache();
-      Serial.println(F("done."));
-    } else {
-      Serial.print(F("Unknown command: "));
-      Serial.println(line);
+// =============================================================================
+// LIVE STATS
+// =============================================================================
+
+static uint32_t totalFrames      = 0;
+static uint32_t lookupHits       = 0;
+static uint32_t bruteHits        = 0;
+static uint32_t unsolvedFrames   = 0;
+
+elapsedMillis statsTimer;
+
+// =============================================================================
+// DUPLICATE SUPPRESSION
+// =============================================================================
+
+static uint8_t lastUnknown[8];
+static bool haveLastUnknown = false;
+
+// =============================================================================
+// CREATE SESSION FILENAMES
+// =============================================================================
+
+void createSessionFilenames()
+{
+    for (int i = 0; i < 10000; i++) {
+
+        sprintf(
+            activeLogFilename,
+            "/a8_full_%04d.csv",
+            i);
+
+        if (!SD.exists(activeLogFilename)) {
+
+            sprintf(
+                unknownLogFilename,
+                "/a8_unknown_%04d.csv",
+                i);
+
+            return;
+        }
     }
-  }
+
+    strcpy(activeLogFilename,
+           "/a8_overflow.csv");
+
+    strcpy(unknownLogFilename,
+           "/a8_unknown_overflow.csv");
 }
 
+// =============================================================================
+// PRINT FRAME
+// =============================================================================
 
+void printFrame(
+    const CAN_message_t &msg)
+{
+    Serial.printf("0x%03X ", msg.id);
 
-void setup() {
+    for (int i = 0; i < msg.len; i++) {
 
-  #pragma region // configure pinmodes
+        if (msg.buf[i] < 0x10)
+            Serial.print("0");
+
+        Serial.print(msg.buf[i], HEX);
+        Serial.print(" ");
+    }
+}
+
+// =============================================================================
+// FULL RAW LOGGER
+// =============================================================================
+
+void logFullFrame(
+    const CAN_message_t &msg)
+{
+    File f =
+        SD.open(activeLogFilename,
+                FILE_WRITE);
+
+    if (!f)
+        return;
+
+    f.print(millis());
+
+    for (int i = 0; i < 8; i++) {
+
+        f.print(",");
+
+        if (msg.buf[i] < 0x10)
+            f.print("0");
+
+        f.print(msg.buf[i], HEX);
+    }
+
+    f.println();
+
+    f.close();
+}
+
+// =============================================================================
+// UNKNOWN FRAME LOGGER
+// =============================================================================
+
+void logUnknownFrame(
+    const CAN_message_t &msg)
+{
+    if (haveLastUnknown &&
+        memcmp(lastUnknown,
+               msg.buf,
+               8) == 0)
+    {
+        return;
+    }
+
+    memcpy(lastUnknown,
+           msg.buf,
+           8);
+
+    haveLastUnknown = true;
+
+    File f =
+        SD.open(unknownLogFilename,
+                FILE_WRITE);
+
+    if (!f)
+        return;
+
+    f.print(millis());
+
+    for (int i = 0; i < 8; i++) {
+
+        f.print(",");
+
+        if (msg.buf[i] < 0x10)
+            f.print("0");
+
+        f.print(msg.buf[i], HEX);
+    }
+
+    f.println();
+
+    f.close();
+}
+
+// =============================================================================
+// LITTLE-ENDIAN SIGNAL EXTRACTION
+// =============================================================================
+
+uint32_t extractSignalLE(
+    const uint8_t *buf,
+    uint16_t startBit,
+    uint8_t bitLength)
+{
+    uint64_t raw = 0;
+
+    for (int i = 0; i < 8; i++) {
+
+        raw |= ((uint64_t)buf[i]) << (8 * i);
+    }
+
+    uint64_t mask =
+        ((uint64_t)1 << bitLength) - 1;
+
+    return (raw >> startBit) & mask;
+}
+
+// =============================================================================
+// DBC DECODER
+// =============================================================================
+
+void decodeA8Signals(
+    const uint8_t buf[8])
+{
+    uint8_t counter =
+        extractSignalLE(buf, 8, 4);
+
+    int16_t tqNegAvail =
+        extractSignalLE(buf, 12, 9) - 509;
+
+    uint16_t tqLimitStat =
+        extractSignalLE(buf, 21, 9);
+
+    int16_t tqLimitDyn =
+        extractSignalLE(buf, 30, 10) - 509;
+
+    uint8_t tqPercent =
+        extractSignalLE(buf, 40, 7);
+
+    bool qBitRPM =
+        extractSignalLE(buf, 47, 1);
+
+    uint16_t engineRPMRaw =
+        extractSignalLE(buf, 48, 16);
+
+    float engineRPM =
+        engineRPMRaw * 0.25f;
+
+    Serial.printf(
+        "CTR=%X "
+        "NegTQ=%dNm "
+        "LimStat=%uNm "
+        "LimDyn=%dNm "
+        "TQ%%=%u "
+        "RPM=%.0f "
+        "Q=%u",
+        counter,
+        tqNegAvail,
+        tqLimitStat,
+        tqLimitDyn,
+        tqPercent,
+        engineRPM,
+        qBitRPM
+    );
+}
+
+// =============================================================================
+// LIVE STATS
+// =============================================================================
+
+void printStats()
+{
+    float hitRate = 0.0f;
+
+    if (totalFrames > 0) {
+
+        hitRate =
+            100.0f *
+            ((float)(lookupHits + bruteHits) /
+             (float)totalFrames);
+    }
+
+    Serial.println();
+    Serial.println("========================================");
+    Serial.println("A8 SOLVER STATS");
+    Serial.println("========================================");
+
+    Serial.printf(
+        "Frames       : %lu\n",
+        totalFrames);
+
+    Serial.printf(
+        "Lookup Hits  : %lu\n",
+        lookupHits);
+
+    Serial.printf(
+        "Bruteforce   : %lu\n",
+        bruteHits);
+
+    Serial.printf(
+        "Unsolved     : %lu\n",
+        unsolvedFrames);
+
+    Serial.printf(
+        "Hit Rate     : %.2f%%\n",
+        hitRate);
+
+    Serial.printf(
+        "Table Entries: %u\n",
+        A8_TABLE_COUNT);
+
+    Serial.println("========================================");
+    Serial.println();
+}
+
+// =============================================================================
+// PROCESS A8
+// =============================================================================
+
+void processA8(
+    const CAN_message_t &msg)
+{
+    totalFrames++;
+
+    // Full logging
+    logFullFrame(msg);
+
+    uint8_t calculated = 0;
+
+    bool usedLookup = false;
+    bool usedBruteforce = false;
+
+    bool solved =
+        solve_checksum_0xA8(
+            msg.buf,
+            &calculated,
+            &usedLookup,
+            &usedBruteforce);
+
+    if (usedLookup)
+        lookupHits++;
+
+    if (usedBruteforce)
+        bruteHits++;
+
+    if (!solved)
+        unsolvedFrames++;
+
+    uint8_t observed =
+        msg.buf[0];
+
+    uint8_t counter =
+        msg.buf[1] & 0x0F;
+
+    uint8_t family =
+        msg.buf[1] & 0xF0;
+
+    printFrame(msg);
+
+    Serial.printf(
+        " | CTR=%X FAMILY=%02X ",
+        counter,
+        family);
+
+    if (!solved) {
+
+        Serial.println("UNSOLVED");
+
+        logUnknownFrame(msg);
+
+        return;
+    }
+
+    Serial.printf(
+        "| OBS=%02X CALC=%02X ",
+        observed,
+        calculated);
+
+    if (usedLookup)
+        Serial.print("LOOKUP ");
+
+    if (usedBruteforce)
+        Serial.print("BRUTE ");
+
+    if (observed == calculated)
+        Serial.print("MATCH ");
+    else
+        Serial.print("FAIL ");
+
+    Serial.print("| ");
+
+    decodeA8Signals(msg.buf);
+
+    Serial.println();
+}
+
+// =============================================================================
+// SETUP
+// =============================================================================
+
+void setup()
+{
+    Serial.begin(115200);
+
+    delay(2000);
 
     pinMode(32, OUTPUT);
     digitalWrite(32, HIGH);
 
+    Serial.println();
+    Serial.println("========================================");
+    Serial.println("A8 FULL LOGGER + SOLVER");
+    Serial.println("========================================");
 
-    pinMode(36, OUTPUT);
-    pinMode(37, OUTPUT);
-    pinMode(2, OUTPUT);
-    pinMode(33, OUTPUT);
-    pinMode(12, OUTPUT);
-    pinMode(4, OUTPUT);
+    // CAN
+    CANbus.begin();
+    CANbus.setBaudRate(500000);
 
-    pinMode(48, OUTPUT);
-    pinMode(49, OUTPUT);
-    pinMode(50, OUTPUT);
-    pinMode(51, OUTPUT);
-    pinMode(52, OUTPUT);
-    pinMode(53, OUTPUT);
-    pinMode(54, OUTPUT);
+    Serial.println("CAN initialized");
 
-  #pragma endregion
+    // SD
+    delay(500);
 
-  #pragma region // Configure Serial and CAN communications
+    if (!SD.begin(BUILTIN_SDCARD)) {
 
-  Serial.begin(115200);
-  uint32_t t0 = millis();
-  while (!Serial && millis() - t0 < 1500) delay(10);
+        Serial.println("SD INIT FAILED");
 
-  Serial.println();
-  Serial.println(F("TFT CAN MITM starting..."));
+    } else {
 
-  can_setup();
-  last_heartbeat = millis();
-  last_serial_check = millis();
+        Serial.println("SD INIT SUCCESS");
 
-  // TFTCAN_PT_CAN_init();
+#if A8_SESSION_LOGGING
 
-  Serial.println(F("Initialization complete."));
+        createSessionFilenames();
 
+#else
 
-  #pragma endregion
+        strcpy(activeLogFilename,
+               "/a8_full.csv");
 
+        strcpy(unknownLogFilename,
+               "/a8_unknown.csv");
 
+#endif
+
+        Serial.print("Full Log: ");
+        Serial.println(activeLogFilename);
+
+        Serial.print("Unknown Log: ");
+        Serial.println(unknownLogFilename);
+
+        // Create full log header
+        {
+            File f =
+                SD.open(activeLogFilename,
+                        FILE_WRITE);
+
+            if (f) {
+
+                f.println(
+                    "time,b0,b1,b2,b3,b4,b5,b6,b7");
+
+                f.close();
+            }
+        }
+
+        // Create unknown log header
+        {
+            File f =
+                SD.open(unknownLogFilename,
+                        FILE_WRITE);
+
+            if (f) {
+
+                f.println(
+                    "time,b0,b1,b2,b3,b4,b5,b6,b7");
+
+                f.close();
+            }
+        }
+    }
+
+    Serial.printf(
+        "A8_TABLE_COUNT = %u\n",
+        A8_TABLE_COUNT);
+
+    Serial.println();
 }
 
-void loop() {
-  // Main CAN MITM loop
-  loop_TFTCAN1_poll();
-  loop_TFTCAN2_poll();
-  loop_TFTCAN3_poll();
+// =============================================================================
+// LOOP
+// =============================================================================
 
-  if(IgnitionStatusTimer_TimeSinceLastMessage < 10000) {
-  do_TFT_MITM_LC_BumpIn_Statuses();
-  do_MCU_CoreTempMonitoring();
-  // do_TFTCAN_PT_CAN_Sniffing();
-  }
+void loop()
+{
+    CAN_message_t msg;
 
-  loop_SerialPrinting_MITM();
+    while (CANbus.read(msg)) {
 
-  uint32_t now = millis();
+        if (msg.id == 0x0A8 &&
+            msg.len == 8)
+        {
+            processA8(msg);
+        }
+    }
 
-  // Heartbeat
-  if (now - last_heartbeat >= HEARTBEAT_MS) {
-    last_heartbeat = now;
-    // Serial.print('.');
-  }
+    if (statsTimer > 5000) {
 
-  // Handle serial commands
-  if (now - last_serial_check >= 200) {
-    last_serial_check = now;
-    // handle_serial_commands();
-  }
+        printStats();
 
-  yield();
+        statsTimer = 0;
+    }
 }

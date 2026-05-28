@@ -1,6 +1,7 @@
 // checksum_types.h — canonical shared enum definitions
 #pragma once
 #include <stdint.h>
+#include <Arduino.h>
 
 // -----------------------------------------------------------------------------
 // Seed selection strategies
@@ -40,3 +41,9 @@ typedef enum ExtraMode {
     EXTRA_0xAA,
     EXTRA_ID_LOW
 } ExtraMode;
+
+
+struct ChecksumEntry7B {
+    uint8_t payload7[7];
+    uint8_t checksum;
+};

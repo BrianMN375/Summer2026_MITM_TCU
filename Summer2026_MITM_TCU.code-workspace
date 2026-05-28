@@ -2,6 +2,15 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../../TFT_May2026_DAZA_Sandals/TFT_May2026_DAZA/TFT-KSCH-2026.1-DAZA Sandals"
+		},
+		{
+			"path": "../../../PlatformIO - 9.28 - Generic CAN Sniffing Raw"
+		},
+		{
+			"path": "../../TFT_May2026_DAZA_Sandals/TFT_May2026_DAZA"
 		}
 	],
 	"settings": {

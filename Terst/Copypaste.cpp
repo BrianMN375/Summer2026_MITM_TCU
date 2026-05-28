@@ -1,0 +1,22 @@
+unsigned int  PT_CAN_msg0x40_buf0, PT_CAN_msg0x40_buf1, PT_CAN_msg0x40_buf2, PT_CAN_msg0x40_buf3, PT_CAN_msg0x40_buf4, PT_CAN_msg0x40_buf5, PT_CAN_msg0x40_buf6, PT_CAN_msg0x40_buf7;
+unsigned int  PT_CAN_msg0xA7_buf0, PT_CAN_msg0xA7_buf1, PT_CAN_msg0xA7_buf2, PT_CAN_msg0xA7_buf3, PT_CAN_msg0xA7_buf4, PT_CAN_msg0xA7_buf5, PT_CAN_msg0xA7_buf6, PT_CAN_msg0xA7_buf7;
+unsigned int  PT_CAN_msg0xA8_buf0, PT_CAN_msg0xA8_buf1, PT_CAN_msg0xA8_buf2, PT_CAN_msg0xA8_buf3, PT_CAN_msg0xA8_buf4, PT_CAN_msg0xA8_buf5, PT_CAN_msg0xA8_buf6, PT_CAN_msg0xA8_buf7;
+unsigned int PT_CAN_msg0x101_buf0, PT_CAN_msg0x101_buf1, PT_CAN_msg0x101_buf2, PT_CAN_msg0x101_buf3, PT_CAN_msg0x101_buf4, PT_CAN_msg0x101_buf5, PT_CAN_msg0x101_buf6, PT_CAN_msg0x101_buf7;
+unsigned int PT_CAN_msg0x104_buf0, PT_CAN_msg0x104_buf1, PT_CAN_msg0x104_buf2, PT_CAN_msg0x104_buf3, PT_CAN_msg0x104_buf4, PT_CAN_msg0x104_buf5, PT_CAN_msg0x104_buf6, PT_CAN_msg0x104_buf7;
+unsigned int PT_CAN_msg0x106_buf0, PT_CAN_msg0x106_buf1, PT_CAN_msg0x106_buf2, PT_CAN_msg0x106_buf3, PT_CAN_msg0x106_buf4, PT_CAN_msg0x106_buf5, PT_CAN_msg0x106_buf6, PT_CAN_msg0x106_buf7;
+unsigned int PT_CAN_msg0x107_buf0, PT_CAN_msg0x107_buf1, PT_CAN_msg0x107_buf2, PT_CAN_msg0x107_buf3, PT_CAN_msg0x107_buf4, PT_CAN_msg0x107_buf5, PT_CAN_msg0x107_buf6, PT_CAN_msg0x107_buf7;
+unsigned int PT_CAN_msg0x11E_buf0, PT_CAN_msg0x11E_buf1, PT_CAN_msg0x11E_buf2, PT_CAN_msg0x11E_buf3, PT_CAN_msg0x11E_buf4, PT_CAN_msg0x11E_buf5, PT_CAN_msg0x11E_buf6, PT_CAN_msg0x11E_buf7;
+unsigned int PT_CAN_msg0x120_buf0, PT_CAN_msg0x120_buf1, PT_CAN_msg0x120_buf2, PT_CAN_msg0x120_buf3, PT_CAN_msg0x120_buf4, PT_CAN_msg0x120_buf5, PT_CAN_msg0x120_buf6, PT_CAN_msg0x120_buf7;
+unsigned int PT_CAN_msg0x121_buf0, PT_CAN_msg0x121_buf1, PT_CAN_msg0x121_buf2, PT_CAN_msg0x121_buf3, PT_CAN_msg0x121_buf4, PT_CAN_msg0x121_buf5, PT_CAN_msg0x121_buf6, PT_CAN_msg0x121_buf7;
+unsigned int PT_CAN_msg0x12B_buf0, PT_CAN_msg0x12B_buf1, PT_CAN_msg0x12B_buf2, PT_CAN_msg0x12B_buf3, PT_CAN_msg0x12B_buf4, PT_CAN_msg0x12B_buf5, PT_CAN_msg0x12B_buf6, PT_CAN_msg0x12B_buf7;
+unsigned int PT_CAN_msg0x1AB_buf0, PT_CAN_msg0x1AB_buf1, PT_CAN_msg0x1AB_buf2, PT_CAN_msg0x1AB_buf3, PT_CAN_msg0x1AB_buf4, PT_CAN_msg0x1AB_buf5, PT_CAN_msg0x1AB_buf6, PT_CAN_msg0x1AB_buf7;
+unsigned int PT_CAN_msg0x30B_buf0, PT_CAN_msg0x30B_buf1, PT_CAN_msg0x30B_buf2, PT_CAN_msg0x30B_buf3, PT_CAN_msg0x30B_buf4, PT_CAN_msg0x30B_buf5, PT_CAN_msg0x30B_buf6, PT_CAN_msg0x30B_buf7;
+unsigned int PT_CAN_msg0x31B_buf0, PT_CAN_msg0x31B_buf1, PT_CAN_msg0x31B_buf2, PT_CAN_msg0x31B_buf3, PT_CAN_msg0x31B_buf4, PT_CAN_msg0x31B_buf5, PT_CAN_msg0x31B_buf6, PT_CAN_msg0x31B_buf7;
+unsigned int PT_CAN_msg0x391_buf0, PT_CAN_msg0x391_buf1, PT_CAN_msg0x391_buf2, PT_CAN_msg0x391_buf3, PT_CAN_msg0x391_buf4, PT_CAN_msg0x391_buf5, PT_CAN_msg0x391_buf6, PT_CAN_msg0x391_buf7;
+unsigned int PT_CAN_msg0x394_buf0, PT_CAN_msg0x394_buf1, PT_CAN_msg0x394_buf2, PT_CAN_msg0x394_buf3, PT_CAN_msg0x394_buf4, PT_CAN_msg0x394_buf5, PT_CAN_msg0x394_buf6, PT_CAN_msg0x394_buf7;
+unsigned int PT_CAN_msg0x3DD_buf0, PT_CAN_msg0x3DD_buf1, PT_CAN_msg0x3DD_buf2, PT_CAN_msg0x3DD_buf3, PT_CAN_msg0x3DD_buf4, PT_CAN_msg0x3DD_buf5, PT_CAN_msg0x3DD_buf6, PT_CAN_msg0x3DD_buf7; // 0x3DD is for paddle positions/shift status
+unsigned int PT_CAN_msg0x598_buf0, PT_CAN_msg0x598_buf1, PT_CAN_msg0x598_buf2, PT_CAN_msg0x598_buf3, PT_CAN_msg0x598_buf4, PT_CAN_msg0x598_buf5, PT_CAN_msg0x598_buf6, PT_CAN_msg0x598_buf7;
+unsigned int PT_CAN_msg0x670_buf0, PT_CAN_msg0x670_buf1, PT_CAN_msg0x670_buf2, PT_CAN_msg0x670_buf3, PT_CAN_msg0x670_buf4, PT_CAN_msg0x670_buf5, PT_CAN_msg0x670_buf6, PT_CAN_msg0x670_buf7;
+unsigned int PT_CAN_msg0x785_buf0, PT_CAN_msg0x785_buf1, PT_CAN_msg0x785_buf2, PT_CAN_msg0x785_buf3, PT_CAN_msg0x785_buf4, PT_CAN_msg0x785_buf5, PT_CAN_msg0x785_buf6, PT_CAN_msg0x785_buf7;
+unsigned int PT_CAN_msg0x786_buf0, PT_CAN_msg0x786_buf1, PT_CAN_msg0x786_buf2, PT_CAN_msg0x786_buf3, PT_CAN_msg0x786_buf4, PT_CAN_msg0x786_buf5, PT_CAN_msg0x786_buf6, PT_CAN_msg0x786_buf7;
+unsigned int PT_CAN_msg0x787_buf0, PT_CAN_msg0x787_buf1, PT_CAN_msg0x787_buf2, PT_CAN_msg0x787_buf3, PT_CAN_msg0x787_buf4, PT_CAN_msg0x787_buf5, PT_CAN_msg0x787_buf6, PT_CAN_msg0x787_buf7;
