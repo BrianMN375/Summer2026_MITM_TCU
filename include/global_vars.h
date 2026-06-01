@@ -5,6 +5,7 @@
 // #include <TFTCAN_SUSP_CAN.h>
 // #include <TFTCAN_OBD_CAN.h>
 // #include <TFTCAN_PT_CAN.h>
+// #include <MQB_CANbus_ParsingHelpers.h>
 
 
 // #define VirginModule
@@ -4535,4 +4536,26 @@ extern int SDCardWrite_Active;
 extern elapsedMillis loopDelaySDCardWrite;
 
 #pragma endregion
+
+
+
+
+
+  #pragma region // 0xA7 - Motor_11 - Engine Torques
+   extern uint8_t  MQB_Motor_11_0xA7_CRC;
+   extern uint8_t  MQB_Motor_11_0xA7_BZ;
+   extern int16_t  MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7;
+   extern int16_t  MQB_Motor_11_0xA7_EngineTqActual_0xA7;
+   extern int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
+   extern int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
+   extern int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
+   extern bool     MQB_Motor_11_0xA7_Status_Normalbetrieb_01;
+   extern bool     MQB_Motor_11_0xA7_erste_Ungenauschwelle;
+   extern bool     MQB_Motor_11_0xA7_QBit_Motormomente;
+
+
+  #pragma endregion
+
+
+
 #endif

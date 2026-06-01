@@ -1896,7 +1896,7 @@
         bool     WIV_SensorError;
         bool     WIV_PrecariousSituation;
         float    WIV_OilLevel;
-        uint8_t  MO_Zustand_HWP;
+        uint8_t  MO_Status_HWP;
         bool     WIV_OilSystem_aktiv;
         bool     WIV_NotAtOperatingTemp;
         bool     WIV_Overfill_Warning;
@@ -1940,7 +1940,7 @@
         s.WIV_OilLevel = (msg.buf[2] & 0x0F) * 12.5f;
 
         // Bits 20–21
-        s.MO_Zustand_HWP = (msg.buf[2] >> 4) & 0x03;
+        s.MO_Status_HWP = (msg.buf[2] >> 4) & 0x03;
 
         // Bits 24–31
         s.WIV_OilSystem_aktiv   = (msg.buf[3] >> 0) & 0x01;
@@ -2618,74 +2618,74 @@
     }
 
 
-// 0x6B8 / 1720 - Kombi_03
-    struct Kombi_03_t {
-        uint16_t KBI_Reifenumfang;
-        bool     KBI_Variante_USA;
-        bool     KBI_Variante;
-        bool     KBI_BCmE_aktiv;
-        bool     KBI_Sparhinweis_quittiert;
-        uint8_t  KBI_Tankfuellstand_Prozen_TankLevelPercent;
-        bool     KBI_Nachtanken_erkannt;
-        float    KBI_Tankinhalt_hochaufl;
-        float    KBI_Max_Tankinhalt;
-        uint16_t KBI_Reifenumfang_Sekundaer;
-    };
-    Kombi_03_t parse_Kombi_03(const CAN_message_t &msg) {
-        Kombi_03_t s = {};
+//// 0x6B8 / 1720 - Kombi_03
+    // struct Kombi_03_t {
+    //     uint16_t KBI_Reifenumfang;
+    //     bool     KBI_Variante_USA;
+    //     bool     KBI_Variante;
+    //     bool     KBI_BCmE_aktiv;
+    //     bool     KBI_Sparhinweis_quittiert;
+    //     uint8_t  KBI_Tankfuellstand_Prozen_TankLevelPercent;
+    //     bool     KBI_Nachtanken_erkannt;
+    //     float    KBI_Tankinhalt_hochaufl;
+    //     float    KBI_Max_Tankinhalt;
+    //     uint16_t KBI_Reifenumfang_Sekundaer;
+    // };
+    // Kombi_03_t parse_Kombi_03(const CAN_message_t &msg) {
+    //     Kombi_03_t s = {};
 
-        // Bits 0–11 (12 bits), factor 1, offset 0
-        {
-            uint16_t raw = ((uint16_t)msg.buf[0]) |
-                        ((((uint16_t)msg.buf[1]) & 0x0F) << 8);
-            s.KBI_Reifenumfang = raw;
-        }
+    //     // Bits 0–11 (12 bits), factor 1, offset 0
+    //     {
+    //         uint16_t raw = ((uint16_t)msg.buf[0]) |
+    //                     ((((uint16_t)msg.buf[1]) & 0x0F) << 8);
+    //         s.KBI_Reifenumfang = raw;
+    //     }
 
-        // Bit 12
-        s.KBI_Variante_USA = (msg.buf[1] >> 4) & 0x01;
+    //     // Bit 12
+    //     s.KBI_Variante_USA = (msg.buf[1] >> 4) & 0x01;
 
-        // Bit 13
-        s.KBI_Variante = (msg.buf[1] >> 5) & 0x01;
+    //     // Bit 13
+    //     s.KBI_Variante = (msg.buf[1] >> 5) & 0x01;
 
-        // Bit 16
-        s.KBI_BCmE_aktiv = (msg.buf[2] >> 0) & 0x01;
+    //     // Bit 16
+    //     s.KBI_BCmE_aktiv = (msg.buf[2] >> 0) & 0x01;
 
-        // Bit 17
-        s.KBI_Sparhinweis_quittiert = (msg.buf[2] >> 1) & 0x01;
+    //     // Bit 17
+    //     s.KBI_Sparhinweis_quittiert = (msg.buf[2] >> 1) & 0x01;
 
-        // Bits 18–24 (7 bits), factor 1, offset 0
-        {
-            uint8_t raw = (msg.buf[2] >> 2) & 0x7F;
-            s.KBI_Tankfuellstand_Prozen_TankLevelPercent = raw;
-        }
+    //     // Bits 18–24 (7 bits), factor 1, offset 0
+    //     {
+    //         uint8_t raw = (msg.buf[2] >> 2) & 0x7F;
+    //         s.KBI_Tankfuellstand_Prozen_TankLevelPercent = raw;
+    //     }
 
-        // Bit 25
-        s.KBI_Nachtanken_erkannt = (msg.buf[3] >> 1) & 0x01;
+    //     // Bit 25
+    //     s.KBI_Nachtanken_erkannt = (msg.buf[3] >> 1) & 0x01;
 
-        // Bits 26–39 (14 bits), factor 0.01, offset 0
-        {
-            uint16_t raw = ((uint16_t)(msg.buf[3] >> 2)) |
-                        (((uint16_t)msg.buf[4]) << 6) |
-                        ((((uint16_t)msg.buf[5]) & 0x0F) << 14);
-            raw &= 0x3FFF;
-            s.KBI_Tankinhalt_hochaufl = raw * 0.01f;
-        }
+    //     // Bits 26–39 (14 bits), factor 0.01, offset 0
+    //     {
+    //         uint16_t raw = ((uint16_t)(msg.buf[3] >> 2)) |
+    //                     (((uint16_t)msg.buf[4]) << 6) |
+    //                     ((((uint16_t)msg.buf[5]) & 0x0F) << 14);
+    //         raw &= 0x3FFF;
+    //         s.KBI_Tankinhalt_hochaufl = raw * 0.01f;
+    //     }
 
-        // Bits 40–47 (8 bits), factor 0.5, offset 0
-        {
-            uint8_t raw = msg.buf[5];
-            s.KBI_Max_Tankinhalt = raw * 0.5f;
-        }
+    //     // Bits 40–47 (8 bits), factor 0.5, offset 0
+    //     {
+    //         uint8_t raw = msg.buf[5];
+    //         s.KBI_Max_Tankinhalt = raw * 0.5f;
+    //     }
 
-        // Bits 48–59 (12 bits), factor 1, offset 0
-        {
-            uint16_t raw = ((uint16_t)msg.buf[6]) |
-                        ((((uint16_t)msg.buf[7]) & 0x0F) << 8);
-            s.KBI_Reifenumfang_Sekundaer = raw;
-        }
+    //     // Bits 48–59 (12 bits), factor 1, offset 0
+    //     {
+    //         uint16_t raw = ((uint16_t)msg.buf[6]) |
+    //                     ((((uint16_t)msg.buf[7]) & 0x0F) << 8);
+    //         s.KBI_Reifenumfang_Sekundaer = raw;
+    //     }
 
-        return s;
-    }
+    //     return s;
+    // }
 
 
 

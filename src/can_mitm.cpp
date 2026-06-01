@@ -963,16 +963,16 @@ unsigned int PT_CAN_msg0x787_buf0, PT_CAN_msg0x787_buf1, PT_CAN_msg0x787_buf2, P
     #pragma endregion
 
   #pragma region // 0xA7 - Motor_11 - Engine Torques
-    uint8_t  MQB_Motor_11_0xA7_CRC;
-    uint8_t  MQB_Motor_11_0xA7_BZ;
-    int16_t  MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7;
-    int16_t  MQB_Motor_11_0xA7_EngineTqActual_0xA7;
-    int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
-    int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
-    int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
-    bool     MQB_Motor_11_0xA7_Status_Normalbetrieb_01;
-    bool     MQB_Motor_11_0xA7_erste_Ungenauschwelle;
-    bool     MQB_Motor_11_0xA7_QBit_Motormomente;
+    // uint8_t  MQB_Motor_11_0xA7_CRC;
+    // uint8_t  MQB_Motor_11_0xA7_BZ;
+    // int16_t  MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7;
+    // int16_t  MQB_Motor_11_0xA7_EngineTqActual_0xA7;
+    // int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
+    // int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
+    // int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
+    // bool     MQB_Motor_11_0xA7_Status_Normalbetrieb_01;
+    // bool     MQB_Motor_11_0xA7_erste_Ungenauschwelle;
+    // bool     MQB_Motor_11_0xA7_QBit_Motormomente;
 
 
   #pragma endregion

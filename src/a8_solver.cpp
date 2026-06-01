@@ -1,138 +1,343 @@
-// =============================================================================
-// a8_solver.cpp
-// =============================================================================
-
 #include "a8_solver.h"
 
-// =============================================================================
-// LEARNED TABLE
-// =============================================================================
+// ------------------------------------------------------------------
+// Counter transform table
+// ------------------------------------------------------------------
 
-const A8ChecksumEntry A8_TABLE[] = {
-
-    {0xD0,0x0,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x9F},
-    {0xD0,0x1,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x15},
-    {0xD0,0x2,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x61},
-    {0xD0,0x3,{0xDF,0xD8,0x78,0x64,0x00,0x00},0xE0},
-    {0xD0,0x4,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x8A},
-    {0xD0,0x5,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x11},
-    {0xD0,0x6,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x98},
-    {0xD0,0x7,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x46},
-    {0xD0,0x8,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x8F},
-    {0xD0,0x9,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x07},
-    {0xD0,0xA,{0xDF,0xD8,0x78,0x64,0x00,0x00},0xC0},
-    {0xD0,0xB,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x36},
-    {0xD0,0xC,{0xDF,0xD8,0x78,0x64,0x00,0x00},0xBD},
-    {0xD0,0xD,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x78},
-    {0xD0,0xE,{0xDF,0xD8,0x78,0x64,0x00,0x00},0xF7},
-    {0xD0,0xF,{0xDF,0xD8,0x78,0x64,0x00,0x00},0x6B},
+static const uint8_t COUNTER_TRANSFORM[16] =
+{
+    0x00, 0x7A, 0x96, 0x79,
+    0xD5, 0xBF, 0x8F, 0x9A,
+    0xB8, 0xCA, 0x95, 0x58,
+    0x46, 0x55, 0xE7, 0x68
 };
 
-const size_t A8_TABLE_COUNT =
-    sizeof(A8_TABLE) /
-    sizeof(A8_TABLE[0]);
+// ------------------------------------------------------------------
+// Linear vectors
+// ------------------------------------------------------------------
 
-// =============================================================================
-// LOOKUP
-// =============================================================================
-
-static bool lookup_checksum_0xA8(
-    const uint8_t frame[8],
-    uint8_t* outChecksum)
+static uint8_t getVector(
+    uint8_t byteIdx,
+    uint8_t bitIdx)
 {
-    uint8_t familyNibble =
-        frame[1] & 0xF0;
+    switch ((byteIdx << 8) | bitIdx)
+    {
+        case 0x0205: return 0x9B;
+        case 0x0206: return 0x19;
+        case 0x0207: return 0x32;
 
-    uint8_t counterNibble =
+        case 0x0300: return 0x54;
+        case 0x0301: return 0xA8;
+        case 0x0302: return 0x7F;
+        case 0x0303: return 0xFE;
+        case 0x0306: return 0x3D;
+        case 0x0307: return 0x7A;
+
+        case 0x0400: return 0xAD;
+        case 0x0401: return 0x75;
+        case 0x0402: return 0xEA;
+        case 0x0403: return 0xFB;
+
+        case 0x0601: return 0x1C;
+        case 0x0602: return 0x38;
+        case 0x0603: return 0x70;
+        case 0x0604: return 0xE0;
+        case 0x0605: return 0xEF;
+        case 0x0606: return 0xF1;
+        case 0x0607: return 0xCD;
+
+        case 0x0700: return 0xE9;
+        case 0x0701: return 0xFD;
+        case 0x0702: return 0xD5;
+        case 0x0703: return 0x85;
+        case 0x0704: return 0x25;
+
+        default:
+            return 0;
+    }
+}
+
+// ------------------------------------------------------------------
+
+void decodeSignals_0xA8(
+    const uint8_t frame[8],
+    float& rpm,
+    uint16_t& stat,
+    int16_t& dyn)
+{
+    uint64_t raw = 0;
+
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        raw |=
+            ((uint64_t)frame[i])
+            << (8 * i);
+    }
+
+    rpm =
+        ((raw >> 48) & 0xFFFF) * 0.25f;
+
+    stat =
+        (raw >> 21) & 0x1FF;
+
+    dyn =
+        ((raw >> 30) & 0x3FF) - 509;
+}
+
+// ------------------------------------------------------------------
+
+uint8_t actualResidual_0xA8(
+    const uint8_t frame[8])
+{
+    uint8_t checksum =
+        frame[0];
+
+    uint8_t counter =
         frame[1] & 0x0F;
 
-    const uint8_t* payloadCore =
-        &frame[2];
+    uint8_t family =
+        checksum ^
+        COUNTER_TRANSFORM[counter];
 
-    for (size_t i = 0;
-         i < A8_TABLE_COUNT;
-         i++)
+    uint8_t linear = 0;
+
+    for (uint8_t byteIdx = 2;
+         byteIdx < 8;
+         byteIdx++)
     {
-        const A8ChecksumEntry& e =
-            A8_TABLE[i];
+        uint8_t value =
+            frame[byteIdx];
 
-        if (e.familyNibble != familyNibble)
-            continue;
-
-        if (e.counterNibble != counterNibble)
-            continue;
-
-        bool match = true;
-
-        for (int j = 0; j < 6; j++) {
-
-            if (e.payloadCore[j] !=
-                payloadCore[j])
+        for (uint8_t bitIdx = 0;
+             bitIdx < 8;
+             bitIdx++)
+        {
+            if (value &
+                (1 << bitIdx))
             {
-                match = false;
-                break;
+                linear ^=
+                    getVector(
+                        byteIdx,
+                        bitIdx);
             }
         }
+    }
 
-        if (match) {
+    return family ^ linear;
+}
 
-            *outChecksum =
-                e.checksum;
+// ------------------------------------------------------------------
 
-            return true;
+uint8_t predictedResidual_0xA8(
+    const uint8_t frame[8])
+{
+    uint8_t byte4 = frame[4];
+    uint8_t byte5 = frame[5];
+    uint8_t byte6 = frame[6];
+    uint8_t byte7 = frame[7];
+
+    float rpm;
+    uint16_t stat;
+    int16_t dyn;
+
+    decodeSignals_0xA8(
+        frame,
+        rpm,
+        stat,
+        dyn);
+
+    // ----------------------------------------------------------
+    // Startup family
+    // ----------------------------------------------------------
+
+    if (
+        byte5 == 0x00 &&
+        byte6 == 0x00 &&
+        byte7 == 0x00)
+    {
+        if (byte4 == 0xFF)
+            return 0x0D;
+
+        if (
+            byte4 >= 0x76 &&
+            byte4 <= 0x7F)
+            return 0xB4;
+    }
+
+    uint8_t predicted;
+
+    // ----------------------------------------------------------
+
+    if (byte4 == 0xFF)
+    {
+        predicted = 0x0D;
+    }
+
+    else if (
+        byte4 >= 0xB0 &&
+        byte4 <= 0xBF)
+    {
+        predicted = 0x5D;
+    }
+
+    else if (
+        byte4 >= 0xA0 &&
+        byte4 <= 0xAF)
+    {
+        predicted = 0x84;
+    }
+
+    else if (
+        byte4 >= 0x91 &&
+        byte4 <= 0x98 &&
+        byte5 == 0x64 &&
+        stat >= 247 &&
+        dyn >= 72)
+    {
+        predicted = 0xC0;
+    }
+
+    else if (
+        byte4 >= 0x99 &&
+        byte4 <= 0x9F &&
+        byte7 >= 0x40)
+    {
+        predicted = 0xC0;
+    }
+
+    else if (
+        byte4 >= 0x90 &&
+        byte4 <= 0x9F)
+    {
+        predicted = 0x1E;
+    }
+
+    else
+    {
+        bool neg =
+            dyn < 3;
+
+        bool high =
+            rpm >= 2048;
+
+        bool mid =
+            stat >= 128;
+
+        if (!high)
+        {
+            if (!mid)
+                predicted =
+                    neg ? 0x25 : 0x5E;
+            else
+                predicted =
+                    neg ? 0xF6 : 0x8D;
+        }
+        else
+        {
+            if (neg)
+            {
+                predicted = 0xBC;
+            }
+            else
+            {
+                if (
+                    byte5 == 0x64 &&
+                    stat >= 121 &&
+                    stat <= 127)
+                {
+                    predicted = 0x14;
+                }
+                else if (
+                    byte5 == 0x64 &&
+                    byte4 >= 0x80 &&
+                    byte4 <= 0x86 &&
+                    byte7 >= 0x4C)
+                {
+                    predicted = 0x19;
+                }
+                else
+                {
+                    predicted = 0xC7;
+                }
+            }
         }
     }
 
-    return false;
-}
+    // ----------------------------------------------------------
+    // Alternate families
+    // ----------------------------------------------------------
 
-// =============================================================================
-// BRUTEFORCE PLACEHOLDER
-// =============================================================================
-
-static bool bruteforce_checksum_0xA8(
-    const uint8_t frame[8],
-    uint8_t* outChecksum)
-{
-    (void)frame;
-    (void)outChecksum;
-
-    // Future:
-    //  CRC(payload || hiddenByte)
-    //  counter-normalized solving
-    //  hidden transform discovery
-
-    return false;
-}
-
-// =============================================================================
-// MASTER SOLVER
-// =============================================================================
-
-bool solve_checksum_0xA8(
-    const uint8_t frame[8],
-    uint8_t* outChecksum,
-    bool* usedLookup,
-    bool* usedBruteforce)
-{
-    *usedLookup = false;
-    *usedBruteforce = false;
-
-    if (lookup_checksum_0xA8(
-            frame,
-            outChecksum))
+    if (byte5 == 0x63)
     {
-        *usedLookup = true;
-        return true;
+        if (
+            predicted == 0x25 ||
+            predicted == 0xF6 ||
+            predicted == 0xBC ||
+            predicted == 0xC7)
+        {
+            predicted ^= 0x7A;
+        }
     }
 
-    if (bruteforce_checksum_0xA8(
-            frame,
-            outChecksum))
+    if (byte5 == 0x62)
     {
-        *usedBruteforce = true;
-        return true;
+        if (
+            predicted == 0x25 ||
+            predicted == 0xBC ||
+            predicted == 0xC7)
+        {
+            predicted ^= 0xCF;
+        }
     }
 
-    return false;
+    if (byte5 == 0x61)
+    {
+        if (
+            predicted == 0x25 ||
+            predicted == 0xBC ||
+            predicted == 0xC7)
+        {
+            predicted ^= 0x3F;
+        }
+    }
+
+    if (byte5 == 0x60)
+    {
+        if (
+            predicted == 0x25 ||
+            predicted == 0xBC ||
+            predicted == 0xC7)
+        {
+            predicted ^= 0x8A;
+        }
+    }
+
+    // ----------------------------------------------------------
+    // High negative overlay
+    // ----------------------------------------------------------
+
+    if (predicted == 0xBC)
+    {
+        if (
+            (byte7 & 0x60) == 0x40)
+        {
+            if (stat < 256)
+                predicted = 0x62;
+            else
+                predicted = 0x38;
+        }
+    }
+
+    return predicted;
+}
+
+// ------------------------------------------------------------------
+
+bool verifyChecksum_0xA8(
+    const uint8_t frame[8])
+{
+    return
+        actualResidual_0xA8(frame)
+        ==
+        predictedResidual_0xA8(frame);
 }

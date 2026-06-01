@@ -24,8 +24,55 @@
 #include <SPI.h>
 #include <SD.h>
 #include <FlexCAN_T4.h>
+#include "global_vars.h"
+// #include "checksum.h"
 
 #include "a8_solver.h"
+
+#include <SD.h>
+
+File logFile;
+File fullLogFile;
+File unknownLogFile;
+
+static constexpr uint32_t LOG_BUFFER_SIZE = 16384;
+
+static char fullLogBuffer[LOG_BUFFER_SIZE];
+static uint32_t fullLogPos = 0;
+
+static char unknownLogBuffer[4096];
+static uint32_t unknownLogPos = 0;
+
+
+static constexpr uint32_t SD_BUFFER_SIZE = 16384;
+
+static uint8_t sdBuffer[SD_BUFFER_SIZE];
+
+static uint32_t sdBufferPos = 0;
+
+static uint32_t totalFlushes = 0;
+static uint32_t totalBytesWritten = 0;
+
+// #include <MQB_CANbus_ParsingHelpers.h>
+// #include "Internal_Onboard_Functions.h"
+
+
+//   #pragma region // 0xA7 - Motor_11 - Engine Torques
+//     uint8_t  MQB_Motor_11_0xA7_CRC;
+//     uint8_t  MQB_Motor_11_0xA7_BZ;
+//     int16_t  MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7;
+//     int16_t  MQB_Motor_11_0xA7_EngineTqActual_0xA7;
+//     int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
+//     int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
+//     int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
+//     bool     MQB_Motor_11_0xA7_Status_Normalbetrieb_01;
+//     bool     MQB_Motor_11_0xA7_erste_Ungenauschwelle;
+//     bool     MQB_Motor_11_0xA7_QBit_Motormomente;
+
+
+//   #pragma endregion
+
+
 
 // =============================================================================
 // CAN
@@ -47,8 +94,8 @@ char unknownLogFilename[32];
 // =============================================================================
 
 static uint32_t totalFrames      = 0;
-static uint32_t lookupHits       = 0;
-static uint32_t bruteHits        = 0;
+uint32_t a8PassCount = 0;
+uint32_t a8FailCount = 0;
 static uint32_t unsolvedFrames   = 0;
 
 elapsedMillis statsTimer;
@@ -114,31 +161,75 @@ void printFrame(
 // FULL RAW LOGGER
 // =============================================================================
 
+
+void flushFullLog()
+{
+    if (!fullLogFile)
+        return;
+
+    if (fullLogPos == 0)
+        return;
+
+    fullLogFile.write(
+        (uint8_t*)fullLogBuffer,
+        fullLogPos);
+
+    fullLogFile.flush();
+
+    fullLogPos = 0;
+}
+
+
+void flushUnknownLog()
+{
+    if (!unknownLogFile)
+        return;
+
+    if (unknownLogPos == 0)
+        return;
+
+    unknownLogFile.write(
+        (uint8_t*)unknownLogBuffer,
+        unknownLogPos);
+
+    unknownLogFile.flush();
+
+    unknownLogPos = 0;
+}
+
 void logFullFrame(
     const CAN_message_t &msg)
 {
-    File f =
-        SD.open(activeLogFilename,
-                FILE_WRITE);
+    char line[96];
 
-    if (!f)
-        return;
+    int len =
+        snprintf(
+            line,
+            sizeof(line),
+            "%lu,%02X,%02X,%02X,%02X,%02X,%02X,%02X,%02X\n",
+            millis(),
+            msg.buf[0],
+            msg.buf[1],
+            msg.buf[2],
+            msg.buf[3],
+            msg.buf[4],
+            msg.buf[5],
+            msg.buf[6],
+            msg.buf[7]);
 
-    f.print(millis());
-
-    for (int i = 0; i < 8; i++) {
-
-        f.print(",");
-
-        if (msg.buf[i] < 0x10)
-            f.print("0");
-
-        f.print(msg.buf[i], HEX);
+    if (
+        fullLogPos + len >=
+        LOG_BUFFER_SIZE)
+    {
+        flushFullLog();
     }
 
-    f.println();
+    memcpy(
+        &fullLogBuffer[fullLogPos],
+        line,
+        len);
 
-    f.close();
+    fullLogPos += len;
 }
 
 // =============================================================================
@@ -156,34 +247,43 @@ void logUnknownFrame(
         return;
     }
 
-    memcpy(lastUnknown,
-           msg.buf,
-           8);
+    memcpy(
+        lastUnknown,
+        msg.buf,
+        8);
 
     haveLastUnknown = true;
 
-    File f =
-        SD.open(unknownLogFilename,
-                FILE_WRITE);
+    char line[96];
 
-    if (!f)
-        return;
+    int len =
+        snprintf(
+            line,
+            sizeof(line),
+            "%lu,%02X,%02X,%02X,%02X,%02X,%02X,%02X,%02X\n",
+            millis(),
+            msg.buf[0],
+            msg.buf[1],
+            msg.buf[2],
+            msg.buf[3],
+            msg.buf[4],
+            msg.buf[5],
+            msg.buf[6],
+            msg.buf[7]);
 
-    f.print(millis());
-
-    for (int i = 0; i < 8; i++) {
-
-        f.print(",");
-
-        if (msg.buf[i] < 0x10)
-            f.print("0");
-
-        f.print(msg.buf[i], HEX);
+    if (
+        unknownLogPos + len >=
+        sizeof(unknownLogBuffer))
+    {
+        flushUnknownLog();
     }
 
-    f.println();
+    memcpy(
+        &unknownLogBuffer[unknownLogPos],
+        line,
+        len);
 
-    f.close();
+    unknownLogPos += len;
 }
 
 // =============================================================================
@@ -263,44 +363,36 @@ void decodeA8Signals(
 
 void printStats()
 {
-    float hitRate = 0.0f;
+    float accuracy = 0.0f;
 
-    if (totalFrames > 0) {
-
-        hitRate =
+    if ((a8PassCount + a8FailCount) > 0)
+    {
+        accuracy =
             100.0f *
-            ((float)(lookupHits + bruteHits) /
-             (float)totalFrames);
+            ((float)a8PassCount /
+            (float)(a8PassCount + a8FailCount));
     }
 
     Serial.println();
     Serial.println("========================================");
-    Serial.println("A8 SOLVER STATS");
+    Serial.println("A8 VALIDATOR STATS");
     Serial.println("========================================");
 
     Serial.printf(
-        "Frames       : %lu\n",
+        "Frames     : %lu\n",
         totalFrames);
 
     Serial.printf(
-        "Lookup Hits  : %lu\n",
-        lookupHits);
+        "Pass       : %lu\n",
+        a8PassCount);
 
     Serial.printf(
-        "Bruteforce   : %lu\n",
-        bruteHits);
+        "Fail       : %lu\n",
+        a8FailCount);
 
     Serial.printf(
-        "Unsolved     : %lu\n",
-        unsolvedFrames);
-
-    Serial.printf(
-        "Hit Rate     : %.2f%%\n",
-        hitRate);
-
-    Serial.printf(
-        "Table Entries: %u\n",
-        A8_TABLE_COUNT);
+        "Accuracy   : %.4f%%\n",
+        accuracy);
 
     Serial.println("========================================");
     Serial.println();
@@ -315,32 +407,24 @@ void processA8(
 {
     totalFrames++;
 
-    // Full logging
     logFullFrame(msg);
 
-    uint8_t calculated = 0;
+    bool pass =
+        verifyChecksum_0xA8(
+            msg.buf);
 
-    bool usedLookup = false;
-    bool usedBruteforce = false;
+    if (pass)
+        a8PassCount++;
+    else
+        a8FailCount++;
 
-    bool solved =
-        solve_checksum_0xA8(
-            msg.buf,
-            &calculated,
-            &usedLookup,
-            &usedBruteforce);
+    uint8_t actual =
+        actualResidual_0xA8(
+            msg.buf);
 
-    if (usedLookup)
-        lookupHits++;
-
-    if (usedBruteforce)
-        bruteHits++;
-
-    if (!solved)
-        unsolvedFrames++;
-
-    uint8_t observed =
-        msg.buf[0];
+    uint8_t predicted =
+        predictedResidual_0xA8(
+            msg.buf);
 
     uint8_t counter =
         msg.buf[1] & 0x0F;
@@ -355,36 +439,71 @@ void processA8(
         counter,
         family);
 
-    if (!solved) {
+    Serial.printf(
+        "| RES_ACT=%02X RES_PRED=%02X ",
+        actual,
+        predicted);
 
-        Serial.println("UNSOLVED");
+    if (pass)
+    {
+        Serial.print("PASS ");
+    }
+    else
+    {
+        Serial.print("FAIL ");
 
         logUnknownFrame(msg);
-
-        return;
     }
-
-    Serial.printf(
-        "| OBS=%02X CALC=%02X ",
-        observed,
-        calculated);
-
-    if (usedLookup)
-        Serial.print("LOOKUP ");
-
-    if (usedBruteforce)
-        Serial.print("BRUTE ");
-
-    if (observed == calculated)
-        Serial.print("MATCH ");
-    else
-        Serial.print("FAIL ");
 
     Serial.print("| ");
 
     decodeA8Signals(msg.buf);
 
     Serial.println();
+}
+
+
+
+
+void flushSDBuffer()
+{
+    if (sdBufferPos == 0)
+        return;
+
+    size_t written =
+        logFile.write(
+            sdBuffer,
+            sdBufferPos);
+
+    totalBytesWritten += written;
+
+    logFile.flush();
+
+    totalFlushes++;
+
+    sdBufferPos = 0;
+}
+
+void bufferedWrite(
+    const uint8_t* data,
+    uint32_t len)
+{
+    if (len > SD_BUFFER_SIZE)
+        return;
+
+    if (
+        sdBufferPos + len >
+        SD_BUFFER_SIZE)
+    {
+        flushSDBuffer();
+    }
+
+    memcpy(
+        &sdBuffer[sdBufferPos],
+        data,
+        len);
+
+    sdBufferPos += len;
 }
 
 // =============================================================================
@@ -471,11 +590,17 @@ void setup()
                 f.close();
             }
         }
-    }
 
-    Serial.printf(
-        "A8_TABLE_COUNT = %u\n",
-        A8_TABLE_COUNT);
+                fullLogFile =
+            SD.open(
+                activeLogFilename,
+                FILE_WRITE);
+
+        unknownLogFile =
+            SD.open(
+                unknownLogFilename,
+                FILE_WRITE);
+    }
 
     Serial.println();
 }
@@ -495,7 +620,64 @@ void loop()
         {
             processA8(msg);
         }
+
+        // if (msg.id == 0x0A7 &&
+        //     msg.len == 8)
+        // {
+        //         Motor_11_t motor11 = parse_Motor_11(msg);
+        //         MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7 = motor11.MO_EngineTqTargetRaw_0xA7;
+        //         MQB_Motor_11_0xA7_EngineTqActual_0xA7 = motor11.MO_EngineTqActual_0xA7;
+        //         MQB_Motor_11_0xA7_EngineTotalMomentsInertia = motor11.MO_EngineTotalMomentsInertia;
+        //         MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7 = motor11.MO_EngineTqTargetFiltered_0xA7;
+        //         MQB_Motor_11_0xA7_EngineTqThrust = motor11.MO_EngineTqThrust;
+        //         MQB_Motor_11_0xA7_Status_Normalbetrieb_01 = motor11.MO_Status_Normalbetrieb_01;
+        //         MQB_Motor_11_0xA7_erste_Ungenauschwelle = motor11.MO_erste_Ungenauschwelle;
+        //         MQB_Motor_11_0xA7_QBit_Motormomente = motor11.MO_QBit_Motormomente;
+
+
+
+        //         //  PT_CAN_msg0xA7_buf0_Raw = PT_CAN_frame.buf[0];
+        //         //  PT_CAN_msg0xA7_buf1_Raw = PT_CAN_frame.buf[1];
+        //         //  PT_CAN_msg0xA7_buf2_Raw = PT_CAN_frame.buf[2];
+        //         //  PT_CAN_msg0xA7_buf3_Raw = PT_CAN_frame.buf[3];
+        //         //  PT_CAN_msg0xA7_buf4_Raw = PT_CAN_frame.buf[4];
+        //         //  PT_CAN_msg0xA7_buf5_Raw = PT_CAN_frame.buf[5];
+        //         //  PT_CAN_msg0xA7_buf6_Raw = PT_CAN_frame.buf[6];
+        //         //  PT_CAN_msg0xA7_buf7_Raw = PT_CAN_frame.buf[7];
+
+        //         //  PT_CAN_msg0xA7_buf0 = PT_CAN_msg0xA7_buf0_Raw;
+        //         //  PT_CAN_msg0xA7_buf1 = PT_CAN_msg0xA7_buf1_Raw;
+        //         //  PT_CAN_msg0xA7_buf2 = PT_CAN_msg0xA7_buf2_Raw;
+        //         //  PT_CAN_msg0xA7_buf3 = PT_CAN_msg0xA7_buf3_Raw;
+        //         //  PT_CAN_msg0xA7_buf4 = PT_CAN_msg0xA7_buf4_Raw;
+        //         //  PT_CAN_msg0xA7_buf5 = PT_CAN_msg0xA7_buf5_Raw;
+        //         //  PT_CAN_msg0xA7_buf6 = PT_CAN_msg0xA7_buf6_Raw;
+        //         //  PT_CAN_msg0xA7_buf7 = PT_CAN_msg0xA7_buf7_Raw;
+
+
+        //     Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
+        //     Serial.print("MQB_Motor_11_0xA7_Status_Normalbetrieb_01: "); Serial.print(MQB_Motor_11_0xA7_Status_Normalbetrieb_01); Serial.print("\t");
+        //     Serial.println("");
+
+
+
+        // }
+
+
     }
+
+        static uint32_t lastFlush = 0;
+
+        if (
+            millis() - lastFlush >
+            1000)
+        {
+            flushFullLog();
+            flushUnknownLog();
+
+            lastFlush = millis();
+        }
+
 
     if (statsTimer > 5000) {
 
