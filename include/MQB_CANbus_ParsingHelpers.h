@@ -180,9 +180,9 @@
         int16_t  MO_EngineTotalMomentsInertia;
         int16_t  MO_EngineTqTargetFiltered_0xA7;
         int16_t  MO_EngineTqThrust;
-        bool     MO_Status_Normalbetrieb_01;
-        bool     MO_erste_Ungenauschwelle;
-        bool     MO_QBit_Motormomente;
+        bool     MO_Status_NormalOperation_01;
+        bool     MO_First_ImprecisionThreshold;
+        bool     MO_QBit_EngineTq;
     };
     Motor_11_t parse_Motor_11(const CAN_message_t &msg) {
         Motor_11_t s = {};
@@ -233,13 +233,13 @@
         }
 
         // Bit 61
-        s.MO_Status_Normalbetrieb_01 = (msg.buf[7] >> 5) & 0x01;
+        s.MO_Status_NormalOperation_01 = (msg.buf[7] >> 5) & 0x01;
 
         // Bit 62
-        s.MO_erste_Ungenauschwelle = (msg.buf[7] >> 6) & 0x01;
+        s.MO_First_ImprecisionThreshold = (msg.buf[7] >> 6) & 0x01;
 
         // Bit 63
-        s.MO_QBit_Motormomente = (msg.buf[7] >> 7) & 0x01;
+        s.MO_QBit_EngineTq = (msg.buf[7] >> 7) & 0x01;
 
         return s;
     }

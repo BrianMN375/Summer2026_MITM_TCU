@@ -28,8 +28,10 @@
 // #include "checksum.h"
 
 #include "a8_solver.h"
+// #include "motor_signals_A7_A8.h"   // signal structs + pack/unpack
+#include "motor_debug_A7_A8.h"
 
-#include <SD.h>
+// #include <SD.h>
 
 File logFile;
 File fullLogFile;
@@ -53,6 +55,8 @@ static uint32_t sdBufferPos = 0;
 static uint32_t totalFlushes = 0;
 static uint32_t totalBytesWritten = 0;
 
+static uint32_t frameNumber = 0;
+
 // #include <MQB_CANbus_ParsingHelpers.h>
 // #include "Internal_Onboard_Functions.h"
 
@@ -65,9 +69,9 @@ static uint32_t totalBytesWritten = 0;
 //     int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
 //     int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
 //     int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
-//     bool     MQB_Motor_11_0xA7_Status_Normalbetrieb_01;
-//     bool     MQB_Motor_11_0xA7_erste_Ungenauschwelle;
-//     bool     MQB_Motor_11_0xA7_QBit_Motormomente;
+//     bool     MQB_Motor_11_0xA7_Status_NormalOperation_01;
+//     bool     MQB_Motor_11_0xA7_First_ImprecisionThreshold;
+//     bool     MQB_Motor_11_0xA7_QBit_EngineTq;
 
 
 //   #pragma endregion
@@ -200,14 +204,21 @@ void flushUnknownLog()
 void logFullFrame(
     const CAN_message_t &msg)
 {
-    char line[96];
+    char line[128];
 
     int len =
         snprintf(
             line,
             sizeof(line),
-            "%lu,%02X,%02X,%02X,%02X,%02X,%02X,%02X,%02X\n",
+            "%lu,%lu,0x%03X,%u,"
+            "%02X,%02X,%02X,%02X,"
+            "%02X,%02X,%02X,%02X\n",
+
+            frameNumber,
             millis(),
+            msg.id,
+            msg.len,
+
             msg.buf[0],
             msg.buf[1],
             msg.buf[2],
@@ -402,12 +413,23 @@ void printStats()
 // PROCESS A8
 // =============================================================================
 
+// void processA8(
+//     const CAN_message_t &msg)
+// {
+//     totalFrames++;
+
+//     logFullFrame(msg);
+
+// }
+
+
+
 void processA8(
     const CAN_message_t &msg)
 {
     totalFrames++;
 
-    logFullFrame(msg);
+    // logFullFrame(msg);
 
     bool pass =
         verifyChecksum_0xA8(
@@ -462,7 +484,14 @@ void processA8(
     Serial.println();
 }
 
-
+bool shouldLogFrame(
+    uint32_t canId)
+{
+    return (
+        canId >= 0x0A0 &&
+        canId <= 0x0AF
+    );
+}
 
 
 void flushSDBuffer()
@@ -570,8 +599,8 @@ void setup()
             if (f) {
 
                 f.println(
-                    "time,b0,b1,b2,b3,b4,b5,b6,b7");
-
+                    "frame,time,id,len,"
+                    "b0,b1,b2,b3,b4,b5,b6,b7");
                 f.close();
             }
         }
@@ -584,9 +613,9 @@ void setup()
 
             if (f) {
 
-                f.println(
-                    "time,b0,b1,b2,b3,b4,b5,b6,b7");
-
+            f.println(
+                "frame,time,id,len,"
+                "b0,b1,b2,b3,b4,b5,b6,b7");
                 f.close();
             }
         }
@@ -611,60 +640,36 @@ void setup()
 
 void loop()
 {
-    CAN_message_t msg;
+CAN_message_t msg;
 
-    while (CANbus.read(msg)) {
+while (CANbus.read(msg))
+{
 
-        if (msg.id == 0x0A8 &&
-            msg.len == 8)
-        {
-            processA8(msg);
-        }
+if (shouldLogFrame(msg.id))
+{
+    frameNumber++;
+    logFullFrame(msg);
+}
 
-        // if (msg.id == 0x0A7 &&
-        //     msg.len == 8)
-        // {
-        //         Motor_11_t motor11 = parse_Motor_11(msg);
-        //         MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7 = motor11.MO_EngineTqTargetRaw_0xA7;
-        //         MQB_Motor_11_0xA7_EngineTqActual_0xA7 = motor11.MO_EngineTqActual_0xA7;
-        //         MQB_Motor_11_0xA7_EngineTotalMomentsInertia = motor11.MO_EngineTotalMomentsInertia;
-        //         MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7 = motor11.MO_EngineTqTargetFiltered_0xA7;
-        //         MQB_Motor_11_0xA7_EngineTqThrust = motor11.MO_EngineTqThrust;
-        //         MQB_Motor_11_0xA7_Status_Normalbetrieb_01 = motor11.MO_Status_Normalbetrieb_01;
-        //         MQB_Motor_11_0xA7_erste_Ungenauschwelle = motor11.MO_erste_Ungenauschwelle;
-        //         MQB_Motor_11_0xA7_QBit_Motormomente = motor11.MO_QBit_Motormomente;
-
-
-
-        //         //  PT_CAN_msg0xA7_buf0_Raw = PT_CAN_frame.buf[0];
-        //         //  PT_CAN_msg0xA7_buf1_Raw = PT_CAN_frame.buf[1];
-        //         //  PT_CAN_msg0xA7_buf2_Raw = PT_CAN_frame.buf[2];
-        //         //  PT_CAN_msg0xA7_buf3_Raw = PT_CAN_frame.buf[3];
-        //         //  PT_CAN_msg0xA7_buf4_Raw = PT_CAN_frame.buf[4];
-        //         //  PT_CAN_msg0xA7_buf5_Raw = PT_CAN_frame.buf[5];
-        //         //  PT_CAN_msg0xA7_buf6_Raw = PT_CAN_frame.buf[6];
-        //         //  PT_CAN_msg0xA7_buf7_Raw = PT_CAN_frame.buf[7];
-
-        //         //  PT_CAN_msg0xA7_buf0 = PT_CAN_msg0xA7_buf0_Raw;
-        //         //  PT_CAN_msg0xA7_buf1 = PT_CAN_msg0xA7_buf1_Raw;
-        //         //  PT_CAN_msg0xA7_buf2 = PT_CAN_msg0xA7_buf2_Raw;
-        //         //  PT_CAN_msg0xA7_buf3 = PT_CAN_msg0xA7_buf3_Raw;
-        //         //  PT_CAN_msg0xA7_buf4 = PT_CAN_msg0xA7_buf4_Raw;
-        //         //  PT_CAN_msg0xA7_buf5 = PT_CAN_msg0xA7_buf5_Raw;
-        //         //  PT_CAN_msg0xA7_buf6 = PT_CAN_msg0xA7_buf6_Raw;
-        //         //  PT_CAN_msg0xA7_buf7 = PT_CAN_msg0xA7_buf7_Raw;
-
-
-        //     Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
-        //     Serial.print("MQB_Motor_11_0xA7_Status_Normalbetrieb_01: "); Serial.print(MQB_Motor_11_0xA7_Status_Normalbetrieb_01); Serial.print("\t");
-        //     Serial.println("");
-
-
-
-        // }
-
-
+    //
+    // Log A-family only
+    //
+    if (shouldLogFrame(msg.id))
+    {
+        logFullFrame(msg);
     }
+
+    //
+    // Run validator only on A8
+    //
+    if (
+        msg.id == 0x0A8 &&
+        msg.len == 8)
+    {
+        motor_validate_print_summary();
+    }
+}
+
 
         static uint32_t lastFlush = 0;
 
@@ -682,7 +687,7 @@ void loop()
     if (statsTimer > 5000) {
 
         printStats();
-
+        motor_validate_print_summary();
         statsTimer = 0;
     }
 }

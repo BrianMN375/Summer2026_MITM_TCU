@@ -1,11 +1,12 @@
 #include <Arduino.h>
-#include "checksum.h"
 #include <FlexCAN_T4.h>
 #include "checksum.h"
 #include "MQB_CANbus_ParsingHelpers.h"
 #include "global_vars.h"
 // #include "dbc_autogen.hpp"
-
+#include "checksum_0xA7_0xA8.h"   // tables + checksum functions
+// #include "motor_signals_A7_A8.h"   // signal structs + pack/unpack
+#include "motor_debug_A7_A8.h"
 
 #pragma region // base FlexCAN Definitions
 
@@ -15,8 +16,8 @@ static unsigned long seed_report_last_ms = 0;
 const unsigned long SEED_REPORT_INTERVAL_MS = 60UL * 1000UL; // every 60s
 
 static FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> TFTCAN1; // This is connected to the ABS Node from the interruption in the SuspCAN bus
-static FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN2; // This is connected to the Gateway side of the interruption in the SuspCAN bus
-static FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN3; // This is just tapped to the PT_CAN 
+static FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN2; // This is connected to the Gateway side of the interruption in the SuspCAN bus
+static FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN3; // This is just tapped to the PT_CAN 
 
 
 #pragma endregion
@@ -970,9 +971,19 @@ unsigned int PT_CAN_msg0x787_buf0, PT_CAN_msg0x787_buf1, PT_CAN_msg0x787_buf2, P
     // int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
     // int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
     // int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
-    // bool     MQB_Motor_11_0xA7_Status_Normalbetrieb_01;
-    // bool     MQB_Motor_11_0xA7_erste_Ungenauschwelle;
-    // bool     MQB_Motor_11_0xA7_QBit_Motormomente;
+    // bool     MQB_Motor_11_0xA7_Status_NormalOperation_01;
+    // bool     MQB_Motor_11_0xA7_First_ImprecisionThreshold;
+    // bool     MQB_Motor_11_0xA7_QBit_EngineTq;
+
+    bool EngineTorqueModification_0xA7_Active;
+    bool EngineTorqueModification_0xA8_Active;
+
+  extern int EngineTqMultiplier_0xA7_Int; // This is divided by 100 to arrive at the actual multiplier value used (e.g. a value of 120 represents a 1.2 multiplier, a value of 80 represents a 0.8 multiplier, etc)
+  extern int EngineTqMultiplier_0xA8_Int; // This is divided by 100 to arrive at the actual multiplier value used (e.g. a value of 120 represents a 1.2 multiplier, a value of 80 represents a 0.8 multiplier, etc)
+
+  extern float EngineTqMultiplier_0xA7;
+  extern float EngineTqMultiplier_0xA8;
+
 
 
   #pragma endregion
@@ -3705,15 +3716,7 @@ void loop_TFTCAN2_poll_MITM_TCU() {
                 // Serial.println("TFTCAN2 recieved");
 
 
-                Motor_11_t motor11 = parse_Motor_11(fromGateway_frame);
-                MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7 = motor11.MO_EngineTqTargetRaw_0xA7;
-                MQB_Motor_11_0xA7_EngineTqActual_0xA7 = motor11.MO_EngineTqActual_0xA7;
-                MQB_Motor_11_0xA7_EngineTotalMomentsInertia = motor11.MO_EngineTotalMomentsInertia;
-                MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7 = motor11.MO_EngineTqTargetFiltered_0xA7;
-                MQB_Motor_11_0xA7_EngineTqThrust = motor11.MO_EngineTqThrust;
-                MQB_Motor_11_0xA7_Status_Normalbetrieb_01 = motor11.MO_Status_Normalbetrieb_01;
-                MQB_Motor_11_0xA7_erste_Ungenauschwelle = motor11.MO_erste_Ungenauschwelle;
-                MQB_Motor_11_0xA7_QBit_Motormomente = motor11.MO_QBit_Motormomente;
+                #pragma region // Motor 11 - CAN bytes Raw
 
 
 
@@ -3736,8 +3739,131 @@ void loop_TFTCAN2_poll_MITM_TCU() {
                  PT_CAN_msg0xA7_FromGateway_buf7 = PT_CAN_msg0xA7_buf7_Raw;
 
 
+                  #pragma endregion
+
+
+                Motor_11_t motor11 = parse_Motor_11(fromGateway_frame);
+                MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7 = motor11.MO_EngineTqTargetRaw_0xA7;
+                MQB_Motor_11_0xA7_EngineTqActual_0xA7 = motor11.MO_EngineTqActual_0xA7;
+                MQB_Motor_11_0xA7_EngineTotalMomentsInertia = motor11.MO_EngineTotalMomentsInertia;
+                MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7 = motor11.MO_EngineTqTargetFiltered_0xA7;
+                MQB_Motor_11_0xA7_EngineTqThrust = motor11.MO_EngineTqThrust;
+                MQB_Motor_11_0xA7_Status_NormalOperation_01 = motor11.MO_Status_NormalOperation_01;
+                MQB_Motor_11_0xA7_First_ImprecisionThreshold = motor11.MO_First_ImprecisionThreshold;
+                MQB_Motor_11_0xA7_QBit_EngineTq = motor11.MO_QBit_EngineTq;
+
+
+
+                motor11_validate(fromGateway_frame.buf);    // <-- add this line
+                motor11_update(fromGateway_frame.buf);          // decode → g_mo11, throttled print
+                // motor11_print_debug();
+
+                  // ---- MODIFICATIONS (edit g_mo11 fields directly) ----
+                  // g_mo11.EngineTqActual        = 150;
+                  // g_mo11.EngineTqTargetRaw     = 150;
+                  // g_mo11.EngineTqTargetFiltered = 150;
+                  // ----------------------------------------------------------
+
+
+                  if(EngineTorqueModification_0xA7_Active == 1) {
+
+
+                  CAN_message_t fromGateway_frame_Modified = fromGateway_frame;
+
+                  motor11_encode(fromGateway_frame_Modified.buf, g_mo11);
+
+
+
+                  build_frame_with_checksum_0xA7(fromGateway_frame_Modified.buf);
+                  TFTCAN3.write(fromGateway_frame_Modified);
+
+                  }
+
+                  else {
+                    TFTCAN3.write(fromGateway_frame); // if no modification, forward unmodified frame to CAN3 (to Gateway/ECU)
+                  }
+
+
+
+
+
             // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
-            // Serial.print("MQB_Motor_11_0xA7_Status_Normalbetrieb_01: "); Serial.print(MQB_Motor_11_0xA7_Status_Normalbetrieb_01); Serial.print("\t");
+            // Serial.print("MQB_Motor_11_0xA7_Status_NormalOperation_01: "); Serial.print(MQB_Motor_11_0xA7_Status_NormalOperation_01); Serial.print("\t");
+            // Serial.println("");
+
+
+
+                                  
+              }
+
+          if (fromGateway_frame.id == 0xA8){ // More Engine Torque Actuals - from ECU
+                // Serial.println("TFTCAN2 recieved");
+
+
+                #pragma region // Motor 12 - CAN bytes Raw
+
+
+
+                 PT_CAN_msg0xA8_buf0_Raw = fromGateway_frame.buf[0];
+                 PT_CAN_msg0xA8_buf1_Raw = fromGateway_frame.buf[1];
+                 PT_CAN_msg0xA8_buf2_Raw = fromGateway_frame.buf[2];
+                 PT_CAN_msg0xA8_buf3_Raw = fromGateway_frame.buf[3];
+                 PT_CAN_msg0xA8_buf4_Raw = fromGateway_frame.buf[4];
+                 PT_CAN_msg0xA8_buf5_Raw = fromGateway_frame.buf[5];
+                 PT_CAN_msg0xA8_buf6_Raw = fromGateway_frame.buf[6];
+                 PT_CAN_msg0xA8_buf7_Raw = fromGateway_frame.buf[7];
+
+                 PT_CAN_msg0xA8_FromGateway_buf0 = PT_CAN_msg0xA8_buf0_Raw;
+                 PT_CAN_msg0xA8_FromGateway_buf1 = PT_CAN_msg0xA8_buf1_Raw;
+                 PT_CAN_msg0xA8_FromGateway_buf2 = PT_CAN_msg0xA8_buf2_Raw;
+                 PT_CAN_msg0xA8_FromGateway_buf3 = PT_CAN_msg0xA8_buf3_Raw;
+                 PT_CAN_msg0xA8_FromGateway_buf4 = PT_CAN_msg0xA8_buf4_Raw;
+                 PT_CAN_msg0xA8_FromGateway_buf5 = PT_CAN_msg0xA8_buf5_Raw;
+                 PT_CAN_msg0xA8_FromGateway_buf6 = PT_CAN_msg0xA8_buf6_Raw;
+                 PT_CAN_msg0xA8_FromGateway_buf7 = PT_CAN_msg0xA8_buf7_Raw;
+
+
+                  #pragma endregion
+
+
+
+
+
+                motor12_validate(fromGateway_frame.buf);    // <-- add this line
+                motor12_update(fromGateway_frame.buf);          // decode → g_mo12, throttled print
+                // motor12_print_debug();
+
+                  // ---- MODIFICATIONS (edit g_mo12 fields directly) ----
+                  // g_mo12.EngineTqActual        = 150;
+                  // g_mo12.EngineTqTargetRaw     = 150;
+                  // g_mo12.EngineTqTargetFiltered = 150;
+                  // ----------------------------------------------------------
+
+
+                  if(EngineTorqueModification_0xA7_Active == 1) {
+
+
+                  CAN_message_t fromGateway_frame_Modified = fromGateway_frame;
+
+                  motor12_encode(fromGateway_frame_Modified.buf, g_mo12 );
+
+
+
+                  build_frame_with_checksum_0xA7(fromGateway_frame_Modified.buf);
+                  TFTCAN3.write(fromGateway_frame_Modified);
+
+                  }
+
+                  else {
+                    TFTCAN3.write(fromGateway_frame); // if no modification, forward unmodified frame to CAN3 (to Gateway/ECU)
+                  }
+
+
+
+
+
+            // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
+            // Serial.print("MQB_Motor_11_0xA7_Status_NormalOperation_01: "); Serial.print(MQB_Motor_11_0xA7_Status_NormalOperation_01); Serial.print("\t");
             // Serial.println("");
 
 
@@ -4114,9 +4240,9 @@ void loop_TFTCAN3_poll_MITM_TCU() {
                 MQB_Motor_11_0xA7_EngineTotalMomentsInertia = motor11.MO_EngineTotalMomentsInertia;
                 MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7 = motor11.MO_EngineTqTargetFiltered_0xA7;
                 MQB_Motor_11_0xA7_EngineTqThrust = motor11.MO_EngineTqThrust;
-                MQB_Motor_11_0xA7_Status_Normalbetrieb_01 = motor11.MO_Status_Normalbetrieb_01;
-                MQB_Motor_11_0xA7_erste_Ungenauschwelle = motor11.MO_erste_Ungenauschwelle;
-                MQB_Motor_11_0xA7_QBit_Motormomente = motor11.MO_QBit_Motormomente;
+                MQB_Motor_11_0xA7_Status_NormalOperation_01 = motor11.MO_Status_NormalOperation_01;
+                MQB_Motor_11_0xA7_First_ImprecisionThreshold = motor11.MO_First_ImprecisionThreshold;
+                MQB_Motor_11_0xA7_QBit_EngineTq = motor11.MO_QBit_EngineTq;
 
 
 
@@ -4140,7 +4266,7 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
 
             // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
-            // Serial.print("MQB_Motor_11_0xA7_Status_Normalbetrieb_01: "); Serial.print(MQB_Motor_11_0xA7_Status_Normalbetrieb_01); Serial.print("\t");
+            // Serial.print("MQB_Motor_11_0xA7_Status_NormalOperation_01: "); Serial.print(MQB_Motor_11_0xA7_Status_NormalOperation_01); Serial.print("\t");
             // Serial.println("");
 
 

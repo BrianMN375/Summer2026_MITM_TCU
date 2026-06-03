@@ -2371,7 +2371,8 @@ extern unsigned int initialLSB_storedHS1_Output_PWMFreq; // Stored PWM Frequency
 
 #pragma region // FlexCAN Variables - PT-CAN  (primarily variables read from PT-CAN sniffing - Operational and Driver Inputs)
 
-extern FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN3;
+extern FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN2;
+extern FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN3;
 
 // Continous TFT Generated CAN Frames on PT-CAN ------------------------------------------------------------------------
 extern CAN_message_t PT_CAN_msg0x780;
@@ -2483,7 +2484,7 @@ extern String PT_CAN_ECUName_buf18, PT_CAN_ECUName_buf19, PT_CAN_ECUName_buf20, 
 #pragma region // FlexCAN Variables - OBD_CAN  (primarily variables used for Service22 Requests/Responses - Operational and Driver Inputs)
 
 #ifndef Concept_TFT_StandaloneHaldexController
-extern FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN2;
+// extern FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN2;
 #endif
 #ifdef Concept_TFT_StandaloneHaldexController
 extern FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN1;
@@ -4549,10 +4550,20 @@ extern elapsedMillis loopDelaySDCardWrite;
    extern int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
    extern int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
    extern int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
-   extern bool     MQB_Motor_11_0xA7_Status_Normalbetrieb_01;
-   extern bool     MQB_Motor_11_0xA7_erste_Ungenauschwelle;
-   extern bool     MQB_Motor_11_0xA7_QBit_Motormomente;
+   extern bool     MQB_Motor_11_0xA7_Status_NormalOperation_01;
+   extern bool     MQB_Motor_11_0xA7_First_ImprecisionThreshold;
+   extern bool     MQB_Motor_11_0xA7_QBit_EngineTq;
 
+  extern bool EngineTorqueModification_0xA7_Active;
+  extern bool EngineTorqueModification_0xA8_Active;
+
+
+
+  extern int EngineTqMultiplier_0xA7_Int; // This is divided by 100 to arrive at the actual multiplier value used (e.g. a value of 120 represents a 1.2 multiplier, a value of 80 represents a 0.8 multiplier, etc)
+  extern int EngineTqMultiplier_0xA8_Int; // This is divided by 100 to arrive at the actual multiplier value used (e.g. a value of 120 represents a 1.2 multiplier, a value of 80 represents a 0.8 multiplier, etc)
+
+  extern float EngineTqMultiplier_0xA7;
+  extern float EngineTqMultiplier_0xA8;
 
   #pragma endregion
 
