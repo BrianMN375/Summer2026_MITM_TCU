@@ -2371,8 +2371,8 @@ extern unsigned int initialLSB_storedHS1_Output_PWMFreq; // Stored PWM Frequency
 
 #pragma region // FlexCAN Variables - PT-CAN  (primarily variables read from PT-CAN sniffing - Operational and Driver Inputs)
 
-extern FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN2;
-extern FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN3;
+extern FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN2;
+extern FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN3;
 
 // Continous TFT Generated CAN Frames on PT-CAN ------------------------------------------------------------------------
 extern CAN_message_t PT_CAN_msg0x780;

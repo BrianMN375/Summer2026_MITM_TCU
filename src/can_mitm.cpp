@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <FlexCAN_T4.h>
-#include "checksum.h"
+// #include "checksum.h"
 #include "MQB_CANbus_ParsingHelpers.h"
 #include "global_vars.h"
 // #include "dbc_autogen.hpp"
@@ -12,29 +12,15 @@
 
 
 elapsedMillis TimeSinceIgnitionON;
-static unsigned long seed_report_last_ms = 0;
-const unsigned long SEED_REPORT_INTERVAL_MS = 60UL * 1000UL; // every 60s
 
 static FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> TFTCAN1; // This is connected to the ABS Node from the interruption in the SuspCAN bus
-static FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN2; // This is connected to the Gateway side of the interruption in the SuspCAN bus
-static FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN3; // This is just tapped to the PT_CAN 
+static FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN2; // In TCU MITM, This is connected to the TCU side of the interruption between the TCU and ECU. 
+static FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN3; // In TCU MITM, This is connected to the ECU side of the interruption between the TCU and ECU. 
 
 
 #pragma endregion
 
 #pragma region // Operational Variables, CAN Definitions, etc
-
-// static const uint32_t IDsToWatch[] = { 0x106, 0x1AB, 0x101 };
-static const uint32_t IDsToWatch[] = { 0x101, 0x104, 0x106, 0x116, 0x11E, 0x120, 0x1AB, 0xA7, 0xA8, 0x11E, 0xB2, 0xFD, 0x392, 0x31B };
-// static const uint32_t IDsToWatch[] = {0x1AB };
-static const size_t NumIDsToWatch = sizeof(IDsToWatch) / sizeof(IDsToWatch[0]);
-
-static bool id_is_watched(uint32_t id) {
-  for (size_t i = 0; i < NumIDsToWatch; i++)
-    if (IDsToWatch[i] == id) return true;
-  return false;
-}
-
 
 
 elapsedMillis StartupDelay;
@@ -57,6 +43,10 @@ elapsedMillis PT_CAN_canTxInterval_0x796;
 elapsedMillis PT_CAN_canTxInterval_0x797;
 
 elapsedMillis LC_BumpIn_TimeSinceActivation;
+
+elapsedMillis TimeSinceWhlSpd0;
+
+
 unsigned int LC_BumpIn_ActivationButton;
 unsigned int LC_BumpIn_ActivationStatus;
 unsigned int LC_BumpIn_MITM_Status;
@@ -70,10 +60,48 @@ unsigned int LC_BumpIn_AcceptableConditions;
 unsigned int MITM_TCU_EngTQmod_ActivationStatus;
 unsigned int MITM_EngTQmod_AcceptableConditions;
 unsigned int MITM_EngTQmod_ActivationButton;
-unsigned int TFT_MITM_EngTQmod_Status_Active_Int;
+unsigned int MITM_TCU_EngTQ_0xA7_Status_Active_Int;
+unsigned int MITM_TCU_EngTQ_0xA8_Status_Active_Int;
+
 
 unsigned int MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int;
 unsigned int MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int;
+
+unsigned int MITM_TCU_EngTQmod_ORIG_EngTqActual_from_0xA7_Int;
+unsigned int MITM_TCU_EngTQmod_MODIFIED_EngTqActual_from_0xA7_Int;
+
+unsigned int MITM_TCU_EngTQmod_ORIG_EngTqRaw_from_0xA7_Int;
+unsigned int MITM_TCU_EngTQmod_MODIFIED_EngTqRaw_from_0xA7_Int;
+
+
+unsigned int motor11_original_EngineTqTargetRaw;
+unsigned int motor11_original_EngineTqActual;
+unsigned int motor11_original_EngineTqTargetFiltered;
+
+unsigned int motor11_EngineTqTargetRaw_Modified;
+unsigned int motor11_EngineTqActual_Modified;
+unsigned int motor11_EngineTqTargetFiltered_Modified;
+
+
+unsigned int motor12_original_EngineTq_Neg_Available;
+unsigned int motor12_original_EngineTqLimit_Stat;
+unsigned int motor12_original_EngineTqLimit_Dyn;
+unsigned int motor12_original_EngineTqPercent;
+unsigned int motor12_original_EngineRPM_raw;
+unsigned int motor12_original_rpm_physical;
+
+unsigned int motor12_EngineTq_Neg_Available_Modified;
+unsigned int motor12_EngineTqLimit_Stat_Modified;
+unsigned int motor12_EngineTqLimit_Dyn_Modified;
+unsigned int motor12_EngineTqPercent_Modified;
+unsigned int motor12_EngineRPM_raw_Modified;
+unsigned int motor12_rpm_physical_Modified;;
+
+
+
+
+
+
 
 unsigned int MITM_TCU_EngTQmod_multiplier_from_msg0x747_Int;
 float MITM_TCU_EngTQmod_multiplier_from_msg0x747_Float;
@@ -87,6 +115,9 @@ float MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Float;
 
 unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit;
 float MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float;
+
+unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit;
+float MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
 
 
 
@@ -191,7 +222,7 @@ word Susp_CAN_msg0xALL_buf0, Susp_CAN_msg0xALL_buf1, Susp_CAN_msg0xALL_buf2, Sus
   CAN_message_t modifiedframe;
 
   CAN_message_t fromGateway_frame;
-  CAN_message_t modifiedGateway_Frame;
+  CAN_message_t fromGateway_frame_Modified;
 
   CAN_message_t fromABS_frame;
   CAN_message_t modifiedABS_Frame1;
@@ -204,6 +235,14 @@ word Susp_CAN_msg0xALL_buf0, Susp_CAN_msg0xALL_buf1, Susp_CAN_msg0xALL_buf2, Sus
   CAN_message_t Susp_CAN_msg0x106; // Brake Pressure
   CAN_message_t Susp_CAN_msg0x1AB; // Brake Pedal Switch
   CAN_message_t Susp_CAN_msg0x391; // AccelPedal
+
+
+  CAN_message_t fromECU_frame;
+  CAN_message_t fromECU_frame_Modified;
+  CAN_message_t modifiedECU_Frame1;
+  CAN_message_t modifiedECU_Frame2;
+  CAN_message_t modifiedECU_FramePreCS;
+  CAN_message_t modifiedECU_FrameCS;
 
 
 
@@ -916,10 +955,38 @@ unsigned int PT_CAN_msg0x787_FromTCU_buf0, PT_CAN_msg0x787_FromTCU_buf1, PT_CAN_
 
 
 
+unsigned int  PT_CAN_msg0x40_FromECU_buf0, PT_CAN_msg0x40_FromECU_buf1, PT_CAN_msg0x40_FromECU_buf2, PT_CAN_msg0x40_FromECU_buf3, PT_CAN_msg0x40_FromECU_buf4, PT_CAN_msg0x40_FromECU_buf5, PT_CAN_msg0x40_FromECU_buf6, PT_CAN_msg0x40_FromECU_buf7;
+unsigned int  PT_CAN_msg0xA7_FromECU_buf0, PT_CAN_msg0xA7_FromECU_buf1, PT_CAN_msg0xA7_FromECU_buf2, PT_CAN_msg0xA7_FromECU_buf3, PT_CAN_msg0xA7_FromECU_buf4, PT_CAN_msg0xA7_FromECU_buf5, PT_CAN_msg0xA7_FromECU_buf6, PT_CAN_msg0xA7_FromECU_buf7;
+unsigned int  PT_CAN_msg0xA8_FromECU_buf0, PT_CAN_msg0xA8_FromECU_buf1, PT_CAN_msg0xA8_FromECU_buf2, PT_CAN_msg0xA8_FromECU_buf3, PT_CAN_msg0xA8_FromECU_buf4, PT_CAN_msg0xA8_FromECU_buf5, PT_CAN_msg0xA8_FromECU_buf6, PT_CAN_msg0xA8_FromECU_buf7;
+unsigned int  PT_CAN_msg0xB2_FromECU_buf0, PT_CAN_msg0xB2_FromECU_buf1, PT_CAN_msg0xB2_FromECU_buf2, PT_CAN_msg0xB2_FromECU_buf3, PT_CAN_msg0xB2_FromECU_buf4, PT_CAN_msg0xB2_FromECU_buf5, PT_CAN_msg0xB2_FromECU_buf6, PT_CAN_msg0xB2_FromECU_buf7;
+unsigned int PT_CAN_msg0x101_FromECU_buf0, PT_CAN_msg0x101_FromECU_buf1, PT_CAN_msg0x101_FromECU_buf2, PT_CAN_msg0x101_FromECU_buf3, PT_CAN_msg0x101_FromECU_buf4, PT_CAN_msg0x101_FromECU_buf5, PT_CAN_msg0x101_FromECU_buf6, PT_CAN_msg0x101_FromECU_buf7;
+unsigned int PT_CAN_msg0x104_FromECU_buf0, PT_CAN_msg0x104_FromECU_buf1, PT_CAN_msg0x104_FromECU_buf2, PT_CAN_msg0x104_FromECU_buf3, PT_CAN_msg0x104_FromECU_buf4, PT_CAN_msg0x104_FromECU_buf5, PT_CAN_msg0x104_FromECU_buf6, PT_CAN_msg0x104_FromECU_buf7;
+unsigned int PT_CAN_msg0x106_FromECU_buf0, PT_CAN_msg0x106_FromECU_buf1, PT_CAN_msg0x106_FromECU_buf2, PT_CAN_msg0x106_FromECU_buf3, PT_CAN_msg0x106_FromECU_buf4, PT_CAN_msg0x106_FromECU_buf5, PT_CAN_msg0x106_FromECU_buf6, PT_CAN_msg0x106_FromECU_buf7;
+unsigned int PT_CAN_msg0x107_FromECU_buf0, PT_CAN_msg0x107_FromECU_buf1, PT_CAN_msg0x107_FromECU_buf2, PT_CAN_msg0x107_FromECU_buf3, PT_CAN_msg0x107_FromECU_buf4, PT_CAN_msg0x107_FromECU_buf5, PT_CAN_msg0x107_FromECU_buf6, PT_CAN_msg0x107_FromECU_buf7;
+unsigned int PT_CAN_msg0x11E_FromECU_buf0, PT_CAN_msg0x11E_FromECU_buf1, PT_CAN_msg0x11E_FromECU_buf2, PT_CAN_msg0x11E_FromECU_buf3, PT_CAN_msg0x11E_FromECU_buf4, PT_CAN_msg0x11E_FromECU_buf5, PT_CAN_msg0x11E_FromECU_buf6, PT_CAN_msg0x11E_FromECU_buf7;
+unsigned int PT_CAN_msg0x120_FromECU_buf0, PT_CAN_msg0x120_FromECU_buf1, PT_CAN_msg0x120_FromECU_buf2, PT_CAN_msg0x120_FromECU_buf3, PT_CAN_msg0x120_FromECU_buf4, PT_CAN_msg0x120_FromECU_buf5, PT_CAN_msg0x120_FromECU_buf6, PT_CAN_msg0x120_FromECU_buf7;
+unsigned int PT_CAN_msg0x121_FromECU_buf0, PT_CAN_msg0x121_FromECU_buf1, PT_CAN_msg0x121_FromECU_buf2, PT_CAN_msg0x121_FromECU_buf3, PT_CAN_msg0x121_FromECU_buf4, PT_CAN_msg0x121_FromECU_buf5, PT_CAN_msg0x121_FromECU_buf6, PT_CAN_msg0x121_FromECU_buf7;
+unsigned int PT_CAN_msg0x12B_FromECU_buf0, PT_CAN_msg0x12B_FromECU_buf1, PT_CAN_msg0x12B_FromECU_buf2, PT_CAN_msg0x12B_FromECU_buf3, PT_CAN_msg0x12B_FromECU_buf4, PT_CAN_msg0x12B_FromECU_buf5, PT_CAN_msg0x12B_FromECU_buf6, PT_CAN_msg0x12B_FromECU_buf7;
+unsigned int PT_CAN_msg0x1AB_FromECU_buf0, PT_CAN_msg0x1AB_FromECU_buf1, PT_CAN_msg0x1AB_FromECU_buf2, PT_CAN_msg0x1AB_FromECU_buf3, PT_CAN_msg0x1AB_FromECU_buf4, PT_CAN_msg0x1AB_FromECU_buf5, PT_CAN_msg0x1AB_FromECU_buf6, PT_CAN_msg0x1AB_FromECU_buf7;
+unsigned int PT_CAN_msg0x30B_FromECU_buf0, PT_CAN_msg0x30B_FromECU_buf1, PT_CAN_msg0x30B_FromECU_buf2, PT_CAN_msg0x30B_FromECU_buf3, PT_CAN_msg0x30B_FromECU_buf4, PT_CAN_msg0x30B_FromECU_buf5, PT_CAN_msg0x30B_FromECU_buf6, PT_CAN_msg0x30B_FromECU_buf7;
+unsigned int PT_CAN_msg0x31B_FromECU_buf0, PT_CAN_msg0x31B_FromECU_buf1, PT_CAN_msg0x31B_FromECU_buf2, PT_CAN_msg0x31B_FromECU_buf3, PT_CAN_msg0x31B_FromECU_buf4, PT_CAN_msg0x31B_FromECU_buf5, PT_CAN_msg0x31B_FromECU_buf6, PT_CAN_msg0x31B_FromECU_buf7;
+unsigned int PT_CAN_msg0x391_FromECU_buf0, PT_CAN_msg0x391_FromECU_buf1, PT_CAN_msg0x391_FromECU_buf2, PT_CAN_msg0x391_FromECU_buf3, PT_CAN_msg0x391_FromECU_buf4, PT_CAN_msg0x391_FromECU_buf5, PT_CAN_msg0x391_FromECU_buf6, PT_CAN_msg0x391_FromECU_buf7;
+unsigned int PT_CAN_msg0x394_FromECU_buf0, PT_CAN_msg0x394_FromECU_buf1, PT_CAN_msg0x394_FromECU_buf2, PT_CAN_msg0x394_FromECU_buf3, PT_CAN_msg0x394_FromECU_buf4, PT_CAN_msg0x394_FromECU_buf5, PT_CAN_msg0x394_FromECU_buf6, PT_CAN_msg0x394_FromECU_buf7;
+unsigned int PT_CAN_msg0x3DD_FromECU_buf0, PT_CAN_msg0x3DD_FromECU_buf1, PT_CAN_msg0x3DD_FromECU_buf2, PT_CAN_msg0x3DD_FromECU_buf3, PT_CAN_msg0x3DD_FromECU_buf4, PT_CAN_msg0x3DD_FromECU_buf5, PT_CAN_msg0x3DD_FromECU_buf6, PT_CAN_msg0x3DD_FromECU_buf7; // 0x3DD is for paddle positions/shift status
+unsigned int PT_CAN_msg0x598_FromECU_buf0, PT_CAN_msg0x598_FromECU_buf1, PT_CAN_msg0x598_FromECU_buf2, PT_CAN_msg0x598_FromECU_buf3, PT_CAN_msg0x598_FromECU_buf4, PT_CAN_msg0x598_FromECU_buf5, PT_CAN_msg0x598_FromECU_buf6, PT_CAN_msg0x598_FromECU_buf7;
+unsigned int PT_CAN_msg0x670_FromECU_buf0, PT_CAN_msg0x670_FromECU_buf1, PT_CAN_msg0x670_FromECU_buf2, PT_CAN_msg0x670_FromECU_buf3, PT_CAN_msg0x670_FromECU_buf4, PT_CAN_msg0x670_FromECU_buf5, PT_CAN_msg0x670_FromECU_buf6, PT_CAN_msg0x670_FromECU_buf7;
+unsigned int PT_CAN_msg0x785_FromECU_buf0, PT_CAN_msg0x785_FromECU_buf1, PT_CAN_msg0x785_FromECU_buf2, PT_CAN_msg0x785_FromECU_buf3, PT_CAN_msg0x785_FromECU_buf4, PT_CAN_msg0x785_FromECU_buf5, PT_CAN_msg0x785_FromECU_buf6, PT_CAN_msg0x785_FromECU_buf7;
+unsigned int PT_CAN_msg0x786_FromECU_buf0, PT_CAN_msg0x786_FromECU_buf1, PT_CAN_msg0x786_FromECU_buf2, PT_CAN_msg0x786_FromECU_buf3, PT_CAN_msg0x786_FromECU_buf4, PT_CAN_msg0x786_FromECU_buf5, PT_CAN_msg0x786_FromECU_buf6, PT_CAN_msg0x786_FromECU_buf7;
+unsigned int PT_CAN_msg0x787_FromECU_buf0, PT_CAN_msg0x787_FromECU_buf1, PT_CAN_msg0x787_FromECU_buf2, PT_CAN_msg0x787_FromECU_buf3, PT_CAN_msg0x787_FromECU_buf4, PT_CAN_msg0x787_FromECU_buf5, PT_CAN_msg0x787_FromECU_buf6, PT_CAN_msg0x787_FromECU_buf7;
+
+
+
+
 
 unsigned int  PT_CAN_msg0x40_buf0, PT_CAN_msg0x40_buf1, PT_CAN_msg0x40_buf2, PT_CAN_msg0x40_buf3, PT_CAN_msg0x40_buf4, PT_CAN_msg0x40_buf5, PT_CAN_msg0x40_buf6, PT_CAN_msg0x40_buf7;
 unsigned int  PT_CAN_msg0xA7_buf0, PT_CAN_msg0xA7_buf1, PT_CAN_msg0xA7_buf2, PT_CAN_msg0xA7_buf3, PT_CAN_msg0xA7_buf4, PT_CAN_msg0xA7_buf5, PT_CAN_msg0xA7_buf6, PT_CAN_msg0xA7_buf7;
 unsigned int  PT_CAN_msg0xA8_buf0, PT_CAN_msg0xA8_buf1, PT_CAN_msg0xA8_buf2, PT_CAN_msg0xA8_buf3, PT_CAN_msg0xA8_buf4, PT_CAN_msg0xA8_buf5, PT_CAN_msg0xA8_buf6, PT_CAN_msg0xA8_buf7;
+unsigned int  PT_CAN_msg0xB2_buf0, PT_CAN_msg0xB2_buf1, PT_CAN_msg0xB2_buf2, PT_CAN_msg0xB2_buf3, PT_CAN_msg0xB2_buf4, PT_CAN_msg0xB2_buf5, PT_CAN_msg0xB2_buf6, PT_CAN_msg0xB2_buf7;
 unsigned int PT_CAN_msg0x101_buf0, PT_CAN_msg0x101_buf1, PT_CAN_msg0x101_buf2, PT_CAN_msg0x101_buf3, PT_CAN_msg0x101_buf4, PT_CAN_msg0x101_buf5, PT_CAN_msg0x101_buf6, PT_CAN_msg0x101_buf7;
 unsigned int PT_CAN_msg0x104_buf0, PT_CAN_msg0x104_buf1, PT_CAN_msg0x104_buf2, PT_CAN_msg0x104_buf3, PT_CAN_msg0x104_buf4, PT_CAN_msg0x104_buf5, PT_CAN_msg0x104_buf6, PT_CAN_msg0x104_buf7;
 unsigned int PT_CAN_msg0x106_buf0, PT_CAN_msg0x106_buf1, PT_CAN_msg0x106_buf2, PT_CAN_msg0x106_buf3, PT_CAN_msg0x106_buf4, PT_CAN_msg0x106_buf5, PT_CAN_msg0x106_buf6, PT_CAN_msg0x106_buf7;
@@ -964,16 +1031,16 @@ unsigned int PT_CAN_msg0x787_buf0, PT_CAN_msg0x787_buf1, PT_CAN_msg0x787_buf2, P
     #pragma endregion
 
   #pragma region // 0xA7 - Motor_11 - Engine Torques
-    // uint8_t  MQB_Motor_11_0xA7_CRC;
-    // uint8_t  MQB_Motor_11_0xA7_BZ;
-    // int16_t  MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7;
-    // int16_t  MQB_Motor_11_0xA7_EngineTqActual_0xA7;
-    // int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
-    // int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
-    // int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
-    // bool     MQB_Motor_11_0xA7_Status_NormalOperation_01;
-    // bool     MQB_Motor_11_0xA7_First_ImprecisionThreshold;
-    // bool     MQB_Motor_11_0xA7_QBit_EngineTq;
+     uint8_t  MQB_Motor_11_0xA7_CRC;
+     uint8_t  MQB_Motor_11_0xA7_BZ;
+     int16_t  MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7;
+     int16_t  MQB_Motor_11_0xA7_EngineTqActual_0xA7;
+     int16_t  MQB_Motor_11_0xA7_EngineTotalMomentsInertia;
+     int16_t  MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
+     int16_t  MQB_Motor_11_0xA7_EngineTqThrust;
+     bool     MQB_Motor_11_0xA7_Status_NormalOperation_01;
+     bool     MQB_Motor_11_0xA7_First_ImprecisionThreshold;
+     bool     MQB_Motor_11_0xA7_QBit_EngineTq;
 
     bool EngineTorqueModification_0xA7_Active;
     bool EngineTorqueModification_0xA8_Active;
@@ -1436,23 +1503,56 @@ unsigned int PT_CAN_msg0x787_buf0, PT_CAN_msg0x787_buf1, PT_CAN_msg0x787_buf2, P
 #pragma region // Archive - not currently used
 
 
-// User-supplied hook
-extern void user_modify_payload(uint32_t id, uint8_t data[8], bool outbound);
+// // User-supplied hook
+// extern void user_modify_payload(uint32_t id, uint8_t data[8], bool outbound);
 
-static void extract_payload7(const uint8_t data[8], uint8_t out7[7]) {
-  for (int i = 0; i < 7; i++) out7[i] = data[i + 1];
-}
+// static void extract_payload7(const uint8_t data[8], uint8_t out7[7]) {
+//   for (int i = 0; i < 7; i++) out7[i] = data[i + 1];
+// }
 
-//helper
-void recalcChecksum(CAN_message_t &frame) {
-    uint8_t newb0 = resolve_X_from_progmem(frame.id, frame.buf);
-    // frame.buf[0] = newb0;
-    frame.buf[0] = computeChecksum_7B(frame.id, frame.buf);
-}
+// //helper
+// void recalcChecksum(CAN_message_t &frame) {
+//     uint8_t newb0 = resolve_X_from_progmem(frame.id, frame.buf);
+//     // frame.buf[0] = newb0;
+//     frame.buf[0] = computeChecksum_7B(frame.id, frame.buf);
+// }
 
 
 
 #pragma endregion
+
+
+
+
+
+// -----------------------------------------------------------------------------
+// TCU MITM: IDs that require custom processing before forwarding to TCU.
+// All other IDs are auto-forwarded to TFTCAN2 immediately (fast-path).
+// Add new IDs here when you need to intercept/modify them.
+// -----------------------------------------------------------------------------
+static const uint32_t TCU_MITM_Handled_IDs[] = {
+    0xA7,    // Motor_11  — engine torque signals + checksum recompute
+    0xA8,    // Motor_12  — engine torque / RPM signals + checksum recompute
+    0xB2,    // ABS - Wheel Speeds Raw
+    0x40,    // Airbags - used for ignition status
+    0x120,   // Cruise Control - used for CruiseStalk On/Off Statuses
+    0x121,   // Motor_20  — uncomment when needed
+    0x12B,   // Cruise Control - usesd for CruiseStalk movement Statuses
+    0x391,   // Motor - Used for Pedal/Throttle Positions
+    0x394,   // Gearbox - Used for Gear Selector Position 
+    0x3DD,   // Steering Column?  - Used for Paddle Positions
+    0x785,   // From TFT Master Module - recieving instructions for EngTq multiplier and torque limiters to be used for MITM to TCU
+
+
+};
+static const size_t TCU_MITM_Handled_IDs_Count = sizeof(TCU_MITM_Handled_IDs) / sizeof(TCU_MITM_Handled_IDs[0]);
+
+static bool tcu_mitm_is_handled(uint32_t id) {
+    for (size_t i = 0; i < TCU_MITM_Handled_IDs_Count; i++)
+        if (TCU_MITM_Handled_IDs[i] == id) return true;
+    return false;
+}
+
 
 
 
@@ -1503,6 +1603,8 @@ pinMode(LED_PIN_CANRecieve, OUTPUT);
   TFTCAN1.mailboxStatus();
 
 
+
+
   TFTCAN2.begin();
   TFTCAN2.setBaudRate(500000);
   TFTCAN2.enableFIFO();
@@ -1524,1301 +1626,1989 @@ LC_BumpIn_AcceptableConditions  = 0;
 TFT_MITM_LC_BumpIn_Status_Active_Int = 0;
 TFT_MITM_LC_BumpInActive_RollingStatus_Int = 0;
 
+MITM_TCU_EngTQ_0xA7_Status_Active_Int = 0;
+MITM_TCU_EngTQ_0xA8_Status_Active_Int = 0;
+CruiseStalk_OFF_FromPT_CAN = 0;
+
+
+
 }
+
 
   #pragma region  // MITM - ABS Node  
 
 
-// Poll TFTCAN1 (From ABS Node), modify if it's currently in LC_BumpIn_Active
-void loop_TFTCAN1_poll_MITM_ABS() {
-  CAN_message_t fromABS_frame;
-  CAN_message_t fromABS_frame_mod;
+    // // Poll TFTCAN1 (From ABS Node), modify if it's currently in LC_BumpIn_Active
+    // void loop_TFTCAN1_poll_MITM_ABS() {
+    //   CAN_message_t fromABS_frame;
+    //   CAN_message_t fromABS_frame_mod;
 
-  // CAN2 → CAN1
-  while (TFTCAN1.read(fromABS_frame)) {
-    //  printFrame(fromABS_frame, 2);  // 2 - Printing Raw Messages received on Can2
+    //   // CAN2 → CAN1
+    //   while (TFTCAN1.read(fromABS_frame)) {
+    //     //  printFrame(fromABS_frame, 2);  // 2 - Printing Raw Messages received on Can2
 
-    if (!id_is_watched(fromABS_frame.id)) {
-          TFTCAN2.write(fromABS_frame);
-    //  printFrame(fromABS_frame, 2);  // 2 - Printing Raw Messages received on Can2
+    //     if (!id_is_watched(fromABS_frame.id)) {
+    //           TFTCAN2.write(fromABS_frame);
+    //     //  printFrame(fromABS_frame, 2);  // 2 - Printing Raw Messages received on Can2
 
-    }
+    //     }
 
 
-        else if (fromABS_frame.id == 0x101) { // ESP Chassis Movements
-              //  printFrame(fromABS_frame, 2);  // 2 - Printing Raw Messages received on Can2
+    //         else if (fromABS_frame.id == 0x101) { // ESP Chassis Movements
+    //               //  printFrame(fromABS_frame, 2);  // 2 - Printing Raw Messages received on Can2
 
-            #pragma region // Original Processing of 0x101 (ESP Chassis Movements) 
+    //             #pragma region // Original Processing of 0x101 (ESP Chassis Movements) 
 
-              ESP_02_t esp02 = parse_ESP_02(fromABS_frame);
-              MQB_ESP_0x101_LongitudinalAcceleration = esp02.ESP_LongitudinalAcceleration;
-              MQB_ESP_0x101_LateralAcceleration = esp02.ESP_LateralAcceleration;
-              MQB_ESP_0x101_Yaw_Rate = esp02.ESP_Yaw_Rate;
-              MQB_ESP_0x101_Status_ESP_PLA = esp02.ESP_Status_ESP_PLA;
-              MQB_ESP_0x101_QBit_Initial_Value_Wank = esp02.ESP_QBit_Initial_Value_Wank;
-              MQB_ESP_0x101_Distribution_Wankmom = esp02.ESP_Distribution_Wankmom;
-              MQB_ESP_0x101_PLA_Abort = esp02.ESP_PLA_Abort;
-              MQB_ESP_0x101_Standstill_Flag = esp02.ESP_Standstill_Flag;
-              MQB_ESP_0x101_QBit_LongitudinalMovement = esp02.ESP_QBit_LongitudinalMovement;
-              MQB_ESP_0x101_QBit_LateralMovement = esp02.ESP_LateralAcceleration;
-              MQB_ESP_0x101_QBit_Yaw_Rate = esp02.ESP_Yaw_Rate;
+    //               ESP_02_t esp02 = parse_ESP_02(fromABS_frame);
+    //               MQB_ESP_0x101_LongitudinalAcceleration = esp02.ESP_LongitudinalAcceleration;
+    //               MQB_ESP_0x101_LateralAcceleration = esp02.ESP_LateralAcceleration;
+    //               MQB_ESP_0x101_Yaw_Rate = esp02.ESP_Yaw_Rate;
+    //               MQB_ESP_0x101_Status_ESP_PLA = esp02.ESP_Status_ESP_PLA;
+    //               MQB_ESP_0x101_QBit_Initial_Value_Wank = esp02.ESP_QBit_Initial_Value_Wank;
+    //               MQB_ESP_0x101_Distribution_Wankmom = esp02.ESP_Distribution_Wankmom;
+    //               MQB_ESP_0x101_PLA_Abort = esp02.ESP_PLA_Abort;
+    //               MQB_ESP_0x101_Standstill_Flag = esp02.ESP_Standstill_Flag;
+    //               MQB_ESP_0x101_QBit_LongitudinalMovement = esp02.ESP_QBit_LongitudinalMovement;
+    //               MQB_ESP_0x101_QBit_LateralMovement = esp02.ESP_LateralAcceleration;
+    //               MQB_ESP_0x101_QBit_Yaw_Rate = esp02.ESP_Yaw_Rate;
 
-              #pragma endregion
+    //               #pragma endregion
 
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
 
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x101_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding           
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x101_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding           
 
-                        ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
-                        ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6];
-                        ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
+    //                         ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
+    //                         ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6];
+    //                         ESP_0x101_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
 
-                        LC_BumpIn_0x101_CallbackRecorded = 1;
+    //                         LC_BumpIn_0x101_CallbackRecorded = 1;
 
-                      }
+    //                       }
 
 
-                #pragma endregion
+    //                 #pragma endregion
 
-            #pragma region // Execute either Unmodified or Modified callback 
+    //             #pragma region // Execute either Unmodified or Modified callback 
 
-              if ( LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x101_CallbackRecorded == 0 ) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+    //               if ( LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x101_CallbackRecorded == 0 ) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
 
-                    TFTCAN2.write(fromABS_frame);
+    //                     TFTCAN2.write(fromABS_frame);
 
-                    // Serial.println("Sent == 0x106 callback frame to CAN1, LC_BumpIn_ActivationStatus == 0 ");
-                    // Serial.println("Sent UNmodified frame to 0x101...");
+    //                     // Serial.println("Sent == 0x106 callback frame to CAN1, LC_BumpIn_ActivationStatus == 0 ");
+    //                     // Serial.println("Sent UNmodified frame to 0x101...");
 
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
 
-                }
+    //                 }
 
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x101_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x101_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
 
-                          CAN_message_t modFrame_0x101;
-                          modFrame_0x101 = fromABS_frame;
+    //                           CAN_message_t modFrame_0x101;
+    //                           modFrame_0x101 = fromABS_frame;
 
-                          modFrame_0x101.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0x101.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0x101.buf[2] = 0x82;
-                          modFrame_0x101.buf[3] = 0x00;
-                          modFrame_0x101.buf[4] = 0x82;
-                          modFrame_0x101.buf[5] = 0x05;
-                          modFrame_0x101.buf[6] = 0x00;
-                          modFrame_0x101.buf[7] = 0x00;  
+    //                           modFrame_0x101.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0x101.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0x101.buf[2] = 0x82;
+    //                           modFrame_0x101.buf[3] = 0x00;
+    //                           modFrame_0x101.buf[4] = 0x82;
+    //                           modFrame_0x101.buf[5] = 0x05;
+    //                           modFrame_0x101.buf[6] = 0x00;
+    //                           modFrame_0x101.buf[7] = 0x00;  
 
 
 
-                          bool hit = build_frame_with_checksum_0x101(modFrame_0x101.buf);
+    //                           bool hit = build_frame_with_checksum_0x101(modFrame_0x101.buf);
 
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
 
-                          // TFTCAN2.write(modFrame_0x101);
-                          TFTCAN2.write(fromABS_frame);
+    //                           // TFTCAN2.write(modFrame_0x101);
+    //                           TFTCAN2.write(fromABS_frame);
 
-                            // Serial.println("Sent MODIFIED frame to 0x101...");
-                            // Serial.print("LC_BumpIn_0x101_CallbackRecorded: "); Serial.print(LC_BumpIn_0x101_CallbackRecorded); Serial.println("\t");                            
-                           
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                            // printFrame(modFrame_0x101, 4); // 4 - Modified messages from CAN2, sending to CAN1
+    //                             // Serial.println("Sent MODIFIED frame to 0x101...");
+    //                             // Serial.print("LC_BumpIn_0x101_CallbackRecorded: "); Serial.print(LC_BumpIn_0x101_CallbackRecorded); Serial.println("\t");                            
+                              
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(modFrame_0x101, 4); // 4 - Modified messages from CAN2, sending to CAN1
 
-                            // // // Serial.println("---------------------------------------------------------------------------------");
+    //                             // // // Serial.println("---------------------------------------------------------------------------------");
 
-                      }
-                  
-
-
-
-                #pragma endregion
-
-          }
-
-        else if (fromABS_frame.id == 0xFD) { // ESP21 - Chassis and system flags
-          //  printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
-
-            #pragma region // Original Processing of 0x101 (ESP Chassis Movements) 
-
-
-              ESP_21_t esp21 = parse_ESP_21(fromABS_frame);
-              MQB_BR_0xFD_Engagement_Torque = esp21.BR_Engagement_Torque;
-              MQB_ABS_0xFD_Braking = esp21.ABS_Braking;
-              MQB_ESP21_0xFD_VehicleSpeed_Signal= esp21.ESP21_VehicleSpeed_Signal;
-              MQB_ESP21_0xFD_QBit_v_Signal = esp21.ESP21_QBit_v_Signal;
-
-              #pragma endregion
-
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
-
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0xFD_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-                // if(LC_BumpIn_ActivationStatus == 0){
-
-                        ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
-                        ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
-                        ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
-
-                        LC_BumpIn_0xFD_CallbackRecorded = 1;
-
-                }
-
-
-                #pragma endregion
-
-            #pragma region // Execute either Unmodified or Modified callback 
-
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0xFD_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent UNmodified frame to 0xFD...");
-                    // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-
-                }
-
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0xFD_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          CAN_message_t modFrame_0xFD;
-                          modFrame_0xFD = fromABS_frame;
-
-                          modFrame_0xFD.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0xFD.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0xFD.buf[2] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf2;
-                          modFrame_0xFD.buf[3] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf3;
-                          modFrame_0xFD.buf[4] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf4;
-                          modFrame_0xFD.buf[5] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf5;
-                          modFrame_0xFD.buf[6] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf6;
-                          modFrame_0xFD.buf[7] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf7;
-
-
-
-                          bool hit = build_frame_with_checksum_0xFD(modFrame_0xFD.buf);
-
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
-
-                          // TFTCAN2.write(modFrame_0xFD);
-                          TFTCAN2.write(fromABS_frame);
-
-                            // Serial.println("Sent MODIFIED frame to 0xFD...");
-                            // Serial.print("LC_BumpIn_0xFD_CallbackRecorded: "); Serial.print(LC_BumpIn_0xFD_CallbackRecorded); Serial.println("\t");  
-
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                            // printFrame(modFrame_0xFD, 4); // 4 - Modified messages from CAN2, sending to CAN1
-
-                            // // // Serial.println("---------------------------------------------------------------------------------");
-
-                      }
-                  
-
-
-
-
-                #pragma endregion
-     
-
-        }
-
-        else if (fromABS_frame.id == 0x104){ // Electric Parking Brake
-
-
-            #pragma region // Original Processing of 0xAB (ESP Brake Pedal Switch)
-
-                  Susp_CAN_msg0x104_FromABS_buf0_Raw = fromABS_frame.buf[0];
-                  Susp_CAN_msg0x104_FromABS_buf1_Raw = fromABS_frame.buf[1];
-                  Susp_CAN_msg0x104_FromABS_buf2_Raw = fromABS_frame.buf[2];
-                  Susp_CAN_msg0x104_FromABS_buf3_Raw = fromABS_frame.buf[3];
-                  Susp_CAN_msg0x104_FromABS_buf4_Raw = fromABS_frame.buf[4];
-                  Susp_CAN_msg0x104_FromABS_buf5_Raw = fromABS_frame.buf[5];
-                  Susp_CAN_msg0x104_FromABS_buf6_Raw = fromABS_frame.buf[6];
-                  Susp_CAN_msg0x104_FromABS_buf7_Raw = fromABS_frame.buf[7];  
-
-                  ParkBrakeStatus_0x104_FromABSCAN = Susp_CAN_msg0x104_FromABS_buf7_Raw;
-                  ParkBrakeStatus_0x104_FromABS = ParkBrakeStatus_0x104_FromABSCAN;
-
-                  EPB_01_t epb = parse_EPB_01(fromABS_frame);
-                  MQB_EPB_0x104_Clamping_Force = epb.EPB_Clamping_Force;
-                  MQB_EPB_0x104_Longitudinal_acceleration = epb.EPB_Longitudinal_acceleration;
-                  MQB_EPB_0x104_Delay_requested = epb.EPB_Delay_requested;
-                  MQB_EPB_0x104_Status = epb.EPB_Status;
-                  MQB_EPB_0x104_Release_Deceleration_Start = epb.EPB_Release_Deceleration_Start;
-                  MQB_EPB_0x104_Release_Delay_Request = epb.EPB_Release_Delay_Request;
-                // TFTCAN2.write(fromABS_frame);                                       //forwarding from TFTCAN1 (ABS origin) to TFTCAN2 (Gateway)
-
-
-              #pragma endregion
-
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
-
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x104_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-                        ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
-                        ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
-                        ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
-
-                        LC_BumpIn_0x104_CallbackRecorded = 1;
-
-                }
-
-
-                #pragma endregion
-
-            #pragma region // Execute either Unmodified or Modified callback 
-
-
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x104_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent UNmodified frame to 0x104...");
-                    // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                          // debug_print_frame_CAN2_Rx_with_checksum(fromABS_frame);
-                          // debug_print_frame_CAN1_Tx_with_checksum(fromABS_frame_mod);
-
-                }
-
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x104_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          CAN_message_t modFrame_0x104;
-                          modFrame_0x104 = fromABS_frame;
-
-                          modFrame_0x104.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0x104.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0x104.buf[2] = 0x55;
-                          modFrame_0x104.buf[3] = 0x05;
-                          modFrame_0x104.buf[4] = 0x00;
-                          modFrame_0x104.buf[5] = 0x00;
-                          modFrame_0x104.buf[6] = 0x00;
-                          modFrame_0x104.buf[7] = 0x30;  
-
-
-
-                          bool hit = build_frame_with_checksum_0x104(modFrame_0x104.buf);
-
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
-
-                          // TFTCAN2.write(modFrame_0x104);
-                          TFTCAN2.write(fromABS_frame);
-
-
-                            // Serial.println("Sent MODIFIED frame to 0x104...");
-                            // Serial.print("LC_BumpIn_0x104_CallbackRecorded: "); Serial.print(LC_BumpIn_0x104_CallbackRecorded); Serial.println("\t");                            
-                          
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                            // printFrame(modFrame_0x104, 4); // 4 - Modified messages from CAN2, sending to CAN1
-
-                            // // // Serial.println("---------------------------------------------------------------------------------");
-
-                      }
-                  
-
-
-
-
-
-                #pragma endregion
-
-
-              }
-        
-        else if (fromABS_frame.id == 0x106) {  // Brake Pressure 
-              //  printFrame(fromABS_frame, 2);  // 2 - Printing Raw Messages received on Can2
-                digitalToggle(52);
-
-            #pragma region // Original Processing of actual Brake Pressure coming from ABS Module
-
-              ESP_05_t esp05 = parse_ESP_05(fromABS_frame);
-              MQB_ESP05_0x106_BrakePressureBAR_Float = esp05.ESP_Brake_Pressure;
-              MQB_ESP05_0x106_BrakePressureMPA_Float = esp05.ESP_Brake_Pressure / 10;
-              MQB_ESP05_0x106_Brake_Pressure = esp05.ESP_Brake_Pressure;
-              MQB_ESP05_0x106_Driver_Brakes = esp05.ESP_Driver_Brakes;
-              MQB_ESP05_0x106_QBit_Brake_Pressure = esp05.ESP_QBit_Brake_Pressure;
-              MQB_ESP05_0x106_Status_Brake_Pressure = esp05.ESP_Status_Brake_Pressure;
-              MQB_ESP05_0x106_QBit_Driver_Brakes = esp05.ESP_QBit_Driver_Brakes;
-              MQB_ECD_0x106_Brake_Light = esp05.ECD_Brake_Light;
-              MQB_ESP05_0x106_Eingr_HL = esp05.ESP_Eingr_HL;
-              MQB_ESP05_0x106_Eingr_HR = esp05.ESP_Eingr_HR;
-              MQB_ESP05_0x106_Eingr_VL = esp05.ESP_Eingr_VL;
-              MQB_ESP05_0x106_Eingr_VR = esp05.ESP_Eingr_VR;
-
-
-              Susp_CAN_msg0x106_FromABS_buf0_Raw = fromABS_frame.buf[0];
-              Susp_CAN_msg0x106_FromABS_buf1_Raw = fromABS_frame.buf[1];
-              Susp_CAN_msg0x106_FromABS_buf2_Raw = fromABS_frame.buf[2];
-              Susp_CAN_msg0x106_FromABS_buf3_Raw = fromABS_frame.buf[3];
-              Susp_CAN_msg0x106_FromABS_buf4_Raw = fromABS_frame.buf[4];
-              Susp_CAN_msg0x106_FromABS_buf5_Raw = fromABS_frame.buf[5];
-              Susp_CAN_msg0x106_FromABS_buf6_Raw = fromABS_frame.buf[6];
-              Susp_CAN_msg0x106_FromABS_buf7_Raw = fromABS_frame.buf[7];  
-
-
-
-              Susp_CAN_msg0x106_FromABS_buf0 = Susp_CAN_msg0x106_FromABS_buf0_Raw;
-              Susp_CAN_msg0x106_FromABS_buf1 = Susp_CAN_msg0x106_FromABS_buf1_Raw;
-              Susp_CAN_msg0x106_FromABS_buf2 = Susp_CAN_msg0x106_FromABS_buf2_Raw;
-              Susp_CAN_msg0x106_FromABS_buf3 = Susp_CAN_msg0x106_FromABS_buf3_Raw;
-              Susp_CAN_msg0x106_FromABS_buf4 = Susp_CAN_msg0x106_FromABS_buf4_Raw;
-              Susp_CAN_msg0x106_FromABS_buf5 = Susp_CAN_msg0x106_FromABS_buf5_Raw;
-              Susp_CAN_msg0x106_FromABS_buf6 = Susp_CAN_msg0x106_FromABS_buf6_Raw;
-              Susp_CAN_msg0x106_FromABS_buf7 = Susp_CAN_msg0x106_FromABS_buf7_Raw;  
-
-
-              TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_Float = MQB_ESP05_0x106_BrakePressureMPA_Float;
-              TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_canTx_16bit = TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_Float * 100;
-
-                  
-          #pragma endregion
-
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
-
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 1 && LC_BumpIn_0x106_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-
-                  BrakePedalSwitchStatus = 2;
-                        //  Serial.println("BrakePedalSwitchStatus: 2");
-
-                        // BrakePedalSwitchStatus_OverrideButtonStatus = 1;
-                        LC_BumpIn_0x106_CallbackRecorded = 1;
-                        // LC_BumpIn_ActivationStatus = 1;
-
-                        // BrakePedalSwitchStatus_atTimeof_LCBumpInActivation = BrakePedalSwitchStatus_FromABS;
-                        BrakePressureMPA_atTimeof_LCBumpInActivation_Float = MQB_ESP05_0x106_BrakePressureMPA_Float;
-              
-                        ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = Susp_CAN_msg0x106_FromABS_buf1;
-                        ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = Susp_CAN_msg0x106_FromABS_buf2;
-                        ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = Susp_CAN_msg0x106_FromABS_buf3;
-                        ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = Susp_CAN_msg0x106_FromABS_buf4;
-                        ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = Susp_CAN_msg0x106_FromABS_buf5;
-                        ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = Susp_CAN_msg0x106_FromABS_buf6;
-                        ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = Susp_CAN_msg0x106_FromABS_buf7;
-
-                      }
-
-                #pragma endregion
-
-            #pragma region // Execute either Unmodified or Modified callback 
-
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x106_CallbackRecorded == 0 ) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent == 0x106 callback frame to CAN1, LC_BumpIn_ActivationStatus == 0 ");
-                    // Serial.println("Sent UNmodified frame to 0x106...");
-
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-
-                }
-
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x106_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          CAN_message_t modFrame_0x106;
-                          modFrame_0x106 = fromABS_frame;
-
-                          modFrame_0x106.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0x106.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0x106.buf[2] = 0x55;
-                          modFrame_0x106.buf[3] = 0x05;
-                          modFrame_0x106.buf[4] = 0x00;
-                          modFrame_0x106.buf[5] = 0x00;
-                          modFrame_0x106.buf[6] = 0x00;
-                          modFrame_0x106.buf[7] = 0x30;  
-
-
-
-                          bool hit = build_frame_with_checksum_0x106(modFrame_0x106.buf);
-
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
-
-                          TFTCAN2.write(modFrame_0x106);
-                          // TFTCAN2.write(fromABS_frame);
-
-                            Serial.println("Sent MODIFIED frame to 0x106...");
-                            Serial.print("LC_BumpIn_0x106_CallbackRecorded: "); Serial.print(LC_BumpIn_0x106_CallbackRecorded); Serial.println("\t");                            
+    //                       }
                       
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                            // printFrame(modFrame_0x106, 4); // 4 - Modified messages from CAN2, sending to CAN1
-
-                            // // // Serial.println("---------------------------------------------------------------------------------");
-
-                      }
-                  
 
 
-                #pragma endregion
+
+    //                 #pragma endregion
+
+    //           }
+
+    //         else if (fromABS_frame.id == 0xFD) { // ESP21 - Chassis and system flags
+    //           //  printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
+
+    //             #pragma region // Original Processing of 0x101 (ESP Chassis Movements) 
+
+
+    //               ESP_21_t esp21 = parse_ESP_21(fromABS_frame);
+    //               MQB_BR_0xFD_Engagement_Torque = esp21.BR_Engagement_Torque;
+    //               MQB_ABS_0xFD_Braking = esp21.ABS_Braking;
+    //               MQB_ESP21_0xFD_VehicleSpeed_Signal= esp21.ESP21_VehicleSpeed_Signal;
+    //               MQB_ESP21_0xFD_QBit_v_Signal = esp21.ESP21_QBit_v_Signal;
+
+    //               #pragma endregion
+
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0xFD_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+    //                 // if(LC_BumpIn_ActivationStatus == 0){
+
+    //                         ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
+    //                         ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
+    //                         ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
+
+    //                         LC_BumpIn_0xFD_CallbackRecorded = 1;
+
+    //                 }
+
+
+    //                 #pragma endregion
+
+    //             #pragma region // Execute either Unmodified or Modified callback 
+
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0xFD_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent UNmodified frame to 0xFD...");
+    //                     // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+
+    //                 }
+
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0xFD_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           CAN_message_t modFrame_0xFD;
+    //                           modFrame_0xFD = fromABS_frame;
+
+    //                           modFrame_0xFD.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0xFD.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0xFD.buf[2] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf2;
+    //                           modFrame_0xFD.buf[3] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf3;
+    //                           modFrame_0xFD.buf[4] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf4;
+    //                           modFrame_0xFD.buf[5] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf5;
+    //                           modFrame_0xFD.buf[6] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf6;
+    //                           modFrame_0xFD.buf[7] = ESP_0xFD_ChassisStatuses_atTimeof_LCBumpInActivation_Int_buf7;
+
+
+
+    //                           bool hit = build_frame_with_checksum_0xFD(modFrame_0xFD.buf);
+
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
+
+    //                           // TFTCAN2.write(modFrame_0xFD);
+    //                           TFTCAN2.write(fromABS_frame);
+
+    //                             // Serial.println("Sent MODIFIED frame to 0xFD...");
+    //                             // Serial.print("LC_BumpIn_0xFD_CallbackRecorded: "); Serial.print(LC_BumpIn_0xFD_CallbackRecorded); Serial.println("\t");  
+
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(modFrame_0xFD, 4); // 4 - Modified messages from CAN2, sending to CAN1
+
+    //                             // // // Serial.println("---------------------------------------------------------------------------------");
+
+    //                       }
+                      
+
+
+
+
+    //                 #pragma endregion
         
-          
-       }
 
-        else if (fromABS_frame.id == 0x116){ // ESP_10 Drivetrain/Brakes
-              // printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
+    //         }
 
-            #pragma region // Original Processing of 0x116 (ESP Chassis Movements) 
+    //         else if (fromABS_frame.id == 0x104){ // Electric Parking Brake
 
 
-                ESP_10_t esp10 = parse_ESP_10(fromABS_frame);
-                MQB_ESP10_0x116_HL_Direction_of_Travel = esp10.ESP_HL_Direction_of_Travel;
-                MQB_ESP10_0x116_HR_Direction_of_Travel = esp10.ESP_HR_Direction_of_Travel;
-                MQB_ESP10_0x116_VL_Direction_of_Travel = esp10.ESP_VL_Direction_of_Travel;
-                MQB_ESP10_0x116_VR_Direction_of_Travel = esp10.ESP_VR_Direction_of_Travel;
-                MQB_ESP10_0x116_Path_Impulse_HL = esp10.ESP_Path_Impulse_HL;
-                MQB_ESP10_0x116_Path_Impulse_HR = esp10.ESP_Path_Impulse_HR;
-                MQB_ESP10_0x116_Path_Impulse_VL = esp10.ESP_Path_Impulse_VL;
-                MQB_ESP10_0x116_Path_Impulse_VR = esp10.ESP_Path_Impulse_VR;
+    //             #pragma region // Original Processing of 0xAB (ESP Brake Pedal Switch)
 
-            #pragma endregion
+    //                   Susp_CAN_msg0x104_FromABS_buf0_Raw = fromABS_frame.buf[0];
+    //                   Susp_CAN_msg0x104_FromABS_buf1_Raw = fromABS_frame.buf[1];
+    //                   Susp_CAN_msg0x104_FromABS_buf2_Raw = fromABS_frame.buf[2];
+    //                   Susp_CAN_msg0x104_FromABS_buf3_Raw = fromABS_frame.buf[3];
+    //                   Susp_CAN_msg0x104_FromABS_buf4_Raw = fromABS_frame.buf[4];
+    //                   Susp_CAN_msg0x104_FromABS_buf5_Raw = fromABS_frame.buf[5];
+    //                   Susp_CAN_msg0x104_FromABS_buf6_Raw = fromABS_frame.buf[6];
+    //                   Susp_CAN_msg0x104_FromABS_buf7_Raw = fromABS_frame.buf[7];  
 
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+    //                   ParkBrakeStatus_0x104_FromABSCAN = Susp_CAN_msg0x104_FromABS_buf7_Raw;
+    //                   ParkBrakeStatus_0x104_FromABS = ParkBrakeStatus_0x104_FromABSCAN;
 
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x116_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-
-                        ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
-                        ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
-                        ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
-
-                        LC_BumpIn_0x116_CallbackRecorded = 1;
-
-                }
+    //                   EPB_01_t epb = parse_EPB_01(fromABS_frame);
+    //                   MQB_EPB_0x104_Clamping_Force = epb.EPB_Clamping_Force;
+    //                   MQB_EPB_0x104_Longitudinal_acceleration = epb.EPB_Longitudinal_acceleration;
+    //                   MQB_EPB_0x104_Delay_requested = epb.EPB_Delay_requested;
+    //                   MQB_EPB_0x104_Status = epb.EPB_Status;
+    //                   MQB_EPB_0x104_Release_Deceleration_Start = epb.EPB_Release_Deceleration_Start;
+    //                   MQB_EPB_0x104_Release_Delay_Request = epb.EPB_Release_Delay_Request;
+    //                 // TFTCAN2.write(fromABS_frame);                                       //forwarding from TFTCAN1 (ABS origin) to TFTCAN2 (Gateway)
 
 
-                #pragma endregion
+    //               #pragma endregion
 
-            #pragma region // Execute either Unmodified or Modified callback 
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
 
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x104_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+    //                         ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
+    //                         ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
+    //                         ESP_0x104_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
 
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x116_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent UNmodified frame to 0x116...");
-                    // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                         LC_BumpIn_0x104_CallbackRecorded = 1;
 
-                }
-
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x116_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          CAN_message_t modFrame_0x116;
-                          modFrame_0x116 = fromABS_frame;
-
-                          // modFrame_0x116.buf[0] = fromABS_frame.buf[0];
-                          // modFrame_0x116.buf[1] = fromABS_frame.buf[1];
-                          // modFrame_0x116.buf[2] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2;
-                          // modFrame_0x116.buf[3] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3;
-                          // modFrame_0x116.buf[4] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4;
-                          // modFrame_0x116.buf[5] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5;
-                          // modFrame_0x116.buf[6] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6;
-                          // modFrame_0x116.buf[7] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7;
-
-                          modFrame_0x116.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0x116.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0x116.buf[2] = fromABS_frame.buf[2];
-                          modFrame_0x116.buf[3] = fromABS_frame.buf[3];
-                          modFrame_0x116.buf[4] = fromABS_frame.buf[4];
-                          modFrame_0x116.buf[5] = fromABS_frame.buf[5];
-                          modFrame_0x116.buf[6] = fromABS_frame.buf[6];
-                          modFrame_0x116.buf[7] = fromABS_frame.buf[7];
+    //                 }
 
 
-                          bool hit = build_frame_with_checksum_0x116(modFrame_0x116.buf);
+    //                 #pragma endregion
 
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
+    //             #pragma region // Execute either Unmodified or Modified callback 
 
-                          // TFTCAN2.write(modFrame_0x116);
-                          TFTCAN2.write(fromABS_frame);
 
-                            // Serial.println("Sent MODIFIED frame to 0x116...");
-                            // Serial.print("LC_BumpIn_0x116_CallbackRecorded: "); Serial.print(LC_BumpIn_0x116_CallbackRecorded); Serial.println("\t");                            
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x104_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent UNmodified frame to 0x104...");
+    //                     // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                           // debug_print_frame_CAN2_Rx_with_checksum(fromABS_frame);
+    //                           // debug_print_frame_CAN1_Tx_with_checksum(fromABS_frame_mod);
+
+    //                 }
+
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x104_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           CAN_message_t modFrame_0x104;
+    //                           modFrame_0x104 = fromABS_frame;
+
+    //                           modFrame_0x104.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0x104.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0x104.buf[2] = 0x55;
+    //                           modFrame_0x104.buf[3] = 0x05;
+    //                           modFrame_0x104.buf[4] = 0x00;
+    //                           modFrame_0x104.buf[5] = 0x00;
+    //                           modFrame_0x104.buf[6] = 0x00;
+    //                           modFrame_0x104.buf[7] = 0x30;  
+
+
+
+    //                           bool hit = build_frame_with_checksum_0x104(modFrame_0x104.buf);
+
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
+
+    //                           // TFTCAN2.write(modFrame_0x104);
+    //                           TFTCAN2.write(fromABS_frame);
+
+
+    //                             // Serial.println("Sent MODIFIED frame to 0x104...");
+    //                             // Serial.print("LC_BumpIn_0x104_CallbackRecorded: "); Serial.print(LC_BumpIn_0x104_CallbackRecorded); Serial.println("\t");                            
+                              
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(modFrame_0x104, 4); // 4 - Modified messages from CAN2, sending to CAN1
+
+    //                             // // // Serial.println("---------------------------------------------------------------------------------");
+
+    //                       }
+                      
+
+
+
+
+
+    //                 #pragma endregion
+
+
+    //               }
+            
+    //         else if (fromABS_frame.id == 0x106) {  // Brake Pressure 
+    //               //  printFrame(fromABS_frame, 2);  // 2 - Printing Raw Messages received on Can2
+    //                 digitalToggle(52);
+
+    //             #pragma region // Original Processing of actual Brake Pressure coming from ABS Module
+
+    //               ESP_05_t esp05 = parse_ESP_05(fromABS_frame);
+    //               MQB_ESP05_0x106_BrakePressureBAR_Float = esp05.ESP_Brake_Pressure;
+    //               MQB_ESP05_0x106_BrakePressureMPA_Float = esp05.ESP_Brake_Pressure / 10;
+    //               MQB_ESP05_0x106_Brake_Pressure = esp05.ESP_Brake_Pressure;
+    //               MQB_ESP05_0x106_Driver_Brakes = esp05.ESP_Driver_Brakes;
+    //               MQB_ESP05_0x106_QBit_Brake_Pressure = esp05.ESP_QBit_Brake_Pressure;
+    //               MQB_ESP05_0x106_Status_Brake_Pressure = esp05.ESP_Status_Brake_Pressure;
+    //               MQB_ESP05_0x106_QBit_Driver_Brakes = esp05.ESP_QBit_Driver_Brakes;
+    //               MQB_ECD_0x106_Brake_Light = esp05.ECD_Brake_Light;
+    //               MQB_ESP05_0x106_Eingr_HL = esp05.ESP_Eingr_HL;
+    //               MQB_ESP05_0x106_Eingr_HR = esp05.ESP_Eingr_HR;
+    //               MQB_ESP05_0x106_Eingr_VL = esp05.ESP_Eingr_VL;
+    //               MQB_ESP05_0x106_Eingr_VR = esp05.ESP_Eingr_VR;
+
+
+    //               Susp_CAN_msg0x106_FromABS_buf0_Raw = fromABS_frame.buf[0];
+    //               Susp_CAN_msg0x106_FromABS_buf1_Raw = fromABS_frame.buf[1];
+    //               Susp_CAN_msg0x106_FromABS_buf2_Raw = fromABS_frame.buf[2];
+    //               Susp_CAN_msg0x106_FromABS_buf3_Raw = fromABS_frame.buf[3];
+    //               Susp_CAN_msg0x106_FromABS_buf4_Raw = fromABS_frame.buf[4];
+    //               Susp_CAN_msg0x106_FromABS_buf5_Raw = fromABS_frame.buf[5];
+    //               Susp_CAN_msg0x106_FromABS_buf6_Raw = fromABS_frame.buf[6];
+    //               Susp_CAN_msg0x106_FromABS_buf7_Raw = fromABS_frame.buf[7];  
+
+
+
+    //               Susp_CAN_msg0x106_FromABS_buf0 = Susp_CAN_msg0x106_FromABS_buf0_Raw;
+    //               Susp_CAN_msg0x106_FromABS_buf1 = Susp_CAN_msg0x106_FromABS_buf1_Raw;
+    //               Susp_CAN_msg0x106_FromABS_buf2 = Susp_CAN_msg0x106_FromABS_buf2_Raw;
+    //               Susp_CAN_msg0x106_FromABS_buf3 = Susp_CAN_msg0x106_FromABS_buf3_Raw;
+    //               Susp_CAN_msg0x106_FromABS_buf4 = Susp_CAN_msg0x106_FromABS_buf4_Raw;
+    //               Susp_CAN_msg0x106_FromABS_buf5 = Susp_CAN_msg0x106_FromABS_buf5_Raw;
+    //               Susp_CAN_msg0x106_FromABS_buf6 = Susp_CAN_msg0x106_FromABS_buf6_Raw;
+    //               Susp_CAN_msg0x106_FromABS_buf7 = Susp_CAN_msg0x106_FromABS_buf7_Raw;  
+
+
+    //               TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_Float = MQB_ESP05_0x106_BrakePressureMPA_Float;
+    //               TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_canTx_16bit = TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_Float * 100;
+
+                      
+    //           #pragma endregion
+
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 1 && LC_BumpIn_0x106_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+
+    //                   BrakePedalSwitchStatus = 2;
+    //                         //  Serial.println("BrakePedalSwitchStatus: 2");
+
+    //                         // BrakePedalSwitchStatus_OverrideButtonStatus = 1;
+    //                         LC_BumpIn_0x106_CallbackRecorded = 1;
+    //                         // LC_BumpIn_ActivationStatus = 1;
+
+    //                         // BrakePedalSwitchStatus_atTimeof_LCBumpInActivation = BrakePedalSwitchStatus_FromABS;
+    //                         BrakePressureMPA_atTimeof_LCBumpInActivation_Float = MQB_ESP05_0x106_BrakePressureMPA_Float;
+                  
+    //                         ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = Susp_CAN_msg0x106_FromABS_buf1;
+    //                         ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = Susp_CAN_msg0x106_FromABS_buf2;
+    //                         ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = Susp_CAN_msg0x106_FromABS_buf3;
+    //                         ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = Susp_CAN_msg0x106_FromABS_buf4;
+    //                         ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = Susp_CAN_msg0x106_FromABS_buf5;
+    //                         ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = Susp_CAN_msg0x106_FromABS_buf6;
+    //                         ESP_0x106_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = Susp_CAN_msg0x106_FromABS_buf7;
+
+    //                       }
+
+    //                 #pragma endregion
+
+    //             #pragma region // Execute either Unmodified or Modified callback 
+
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x106_CallbackRecorded == 0 ) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent == 0x106 callback frame to CAN1, LC_BumpIn_ActivationStatus == 0 ");
+    //                     // Serial.println("Sent UNmodified frame to 0x106...");
+
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+
+    //                 }
+
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x106_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           CAN_message_t modFrame_0x106;
+    //                           modFrame_0x106 = fromABS_frame;
+
+    //                           modFrame_0x106.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0x106.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0x106.buf[2] = 0x55;
+    //                           modFrame_0x106.buf[3] = 0x05;
+    //                           modFrame_0x106.buf[4] = 0x00;
+    //                           modFrame_0x106.buf[5] = 0x00;
+    //                           modFrame_0x106.buf[6] = 0x00;
+    //                           modFrame_0x106.buf[7] = 0x30;  
+
+
+
+    //                           bool hit = build_frame_with_checksum_0x106(modFrame_0x106.buf);
+
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
+
+    //                           TFTCAN2.write(modFrame_0x106);
+    //                           // TFTCAN2.write(fromABS_frame);
+
+    //                             Serial.println("Sent MODIFIED frame to 0x106...");
+    //                             Serial.print("LC_BumpIn_0x106_CallbackRecorded: "); Serial.print(LC_BumpIn_0x106_CallbackRecorded); Serial.println("\t");                            
                           
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                            // printFrame(modFrame_0x116, 4); // 4 - Modified messages from CAN2, sending to CAN1
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(modFrame_0x106, 4); // 4 - Modified messages from CAN2, sending to CAN1
 
-                            // // // Serial.println("---------------------------------------------------------------------------------");
+    //                             // // // Serial.println("---------------------------------------------------------------------------------");
 
-                      }
-                  
+    //                       }
+                      
 
 
-
-                #pragma endregion
-
-
-
-            }
-
-        else if (fromABS_frame.id == 0x11E){ // ESP_08Chassis Movements - velocity, direction of travel, etc
-              // printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
-
-
-            #pragma region // Original Processing of 0x101 (ESP Chassis Movements) 
-
-
-                ESP_08_t esp08 = parse_ESP_08(fromABS_frame);
-                MQB_ESP08_0x11E_Slipping_Stillstand = esp08.ESP_Slipping_Stillstand;
-                MQB_ESP08_0x11E_StandStillPhase_Exhausted = esp08.ESP_StandStillPhase_Exhausted;
-                MQB_ESP08_0x11E_VehicleSpeed_ref_Direction_Of_Travel = esp08.ESP_v_ref_Direction_Of_Travel;
-                MQB_ESP08_0x11E_VehicleSpeed_ref = esp08.ESP_v_ref;
-                MQB_ESC_0x11E_Brake_Pressure_Gradient = esp08.ESC_Brake_Pressure_Gradient;
-
-            #pragma endregion
-
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
-
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x11E_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-
-                        // ESP_0x1AB_Statuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
-                        ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
-                        ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
-
-                        LC_BumpIn_0x11E_CallbackRecorded = 1;
-
-                }
-
-
-                #pragma endregion
-
-            #pragma region // Execute either Unmodified or Modified callback 
-
-
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x11E_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent UNmodified frame to 0x11E...");
-                    // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                          // debug_print_frame_CAN2_Rx_with_checksum(fromABS_frame);
-                          // debug_print_frame_CAN1_Tx_with_checksum(fromABS_frame_mod);
-
-                }
-
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x11E_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          CAN_message_t modFrame_0x11E;
-                          modFrame_0x11E = fromABS_frame;
-
-                          modFrame_0x11E.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0x11E.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0x11E.buf[2] = 0x00;
-                          modFrame_0x11E.buf[3] = 0x00;
-                          modFrame_0x11E.buf[4] = 0x00;
-                          modFrame_0x11E.buf[5] = 0x00;
-                          modFrame_0x11E.buf[6] = 0x00;
-                          modFrame_0x11E.buf[7] = 0x00;  
-
-
-
-                          bool hit = build_frame_with_checksum_0x11E(modFrame_0x11E.buf);
-
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
-
-                          // TFTCAN2.write(modFrame_0x11E);
-                          TFTCAN2.write(fromABS_frame);
-
-                            // Serial.println("Sent MODIFIED frame to 0x11E...");
-                            // Serial.print("LC_BumpIn_0x11E_CallbackRecorded: "); Serial.print(LC_BumpIn_0x11E_CallbackRecorded); Serial.println("\t");                            
-                         
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                            // printFrame(modFrame_0x11E, 4); // 4 - Modified messages from CAN2, sending to CAN1
-
-                            // // // Serial.println("---------------------------------------------------------------------------------");
-
-                      }
-                  
-
-
-
-                #pragma endregion
-
-
-
-
-            }
-
-        else if (fromABS_frame.id == 0x1AB){ // Brake Pedal Switch
-
-          
-            #pragma region // Original Processing of 0xAB (ESP Brake Pedal Switch)
-
-                  Susp_CAN_msg0x1AB_FromABS_buf0_Raw = fromABS_frame.buf[0];
-                  Susp_CAN_msg0x1AB_FromABS_buf1_Raw = fromABS_frame.buf[1];
-                  Susp_CAN_msg0x1AB_FromABS_buf2_Raw = fromABS_frame.buf[2];
-                  Susp_CAN_msg0x1AB_FromABS_buf3_Raw = fromABS_frame.buf[3];
-                  Susp_CAN_msg0x1AB_FromABS_buf4_Raw = fromABS_frame.buf[4];
-                  Susp_CAN_msg0x1AB_FromABS_buf5_Raw = fromABS_frame.buf[5];
-                  Susp_CAN_msg0x1AB_FromABS_buf6_Raw = fromABS_frame.buf[6];
-                  Susp_CAN_msg0x1AB_FromABS_buf7_Raw = fromABS_frame.buf[7];  
-
-                BrakeSwitch_0x1AB_CAN_FromABS = Susp_CAN_msg0x1AB_FromABS_buf6_Raw;
-                BrakeSwitch_0x1AB_FromABS = BrakeSwitch_0x1AB_CAN_FromABS; // When pedal is not pressed, byte6 is 0x04.  When pedal is pressed, byte6 is 0x05
-
-                if(BrakeSwitch_0x1AB_FromABS == 4) {
-                BrakePedalSwitchStatus_FromABS = 0;
-                }
-                else if(BrakeSwitch_0x1AB_FromABS == 5) {
-                BrakePedalSwitchStatus_FromABS = 1;
-                }
-              // Serial.print("BrakeSwitch_0x1AB_FromABS: ");  Serial.print(BrakeSwitch_0x1AB_FromABS);  
-              // Serial.println();
-              // Serial.print("BrakePedalSwitchStatus_FromABS: ");  Serial.print(BrakePedalSwitchStatus_FromABS);  
-              // Serial.println();
-                // TFTCAN2.write(fromABS_frame);                                       //forwarding from TFTCAN1 (ABS origin) to TFTCAN2 (Gateway)
-
-              #pragma endregion
-
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
-
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x1AB_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-
-                        ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3]; // Should be 0x2 when brake is pressed
-                        ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; // Shoiuld be 0x5 when brake is pressed
-                        ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
-
-                        LC_BumpIn_0x1AB_CallbackRecorded = 1;
-
-                }
-
-
-                #pragma endregion
-
-            #pragma region // Execute either Unmodified or Modified callback 
-
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x1AB_CallbackRecorded == 0 ) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent UNmodified frame to 0x1AB...");
-                    // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-
-                }
-          
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x1AB_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          CAN_message_t modFrame_0x1AB;
-                          modFrame_0x1AB = fromABS_frame;
-
-                          modFrame_0x1AB.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0x1AB.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0x1AB.buf[2] = 0x00;
-                          modFrame_0x1AB.buf[3] = 0x02;
-                          modFrame_0x1AB.buf[4] = 0x00;
-                          modFrame_0x1AB.buf[5] = 0x00;
-                          modFrame_0x1AB.buf[6] = 0x05;
-                          modFrame_0x1AB.buf[7] = 0x00;  
-
-
-
-                          bool hit = build_frame_with_checksum_0x1AB(modFrame_0x1AB.buf);
-
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
-
-                          TFTCAN2.write(modFrame_0x1AB);
-                          // TFTCAN2.write(fromABS_frame);
-
-                          // Serial.println("Sent MODIFIED frame to 0x1AB...");
-                            // Serial.print("LC_BumpIn_0x1AB_CallbackRecorded: "); Serial.print(LC_BumpIn_0x1AB_CallbackRecorded); Serial.println("\t");                            
-                        
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)                         
-                            // printFrame(modFrame_0x1AB, 4); // 4 - Modified messages from CAN2, sending to CAN1
-
-                            // // // Serial.println("---------------------------------------------------------------------------------");
-
-                      }
-                  
-
-                #pragma endregion
-
-
-
-              }
-
-        else if (fromABS_frame.id == 0x31B) { // ESP_24 - Vehicle speed and wheel rotation counter
-
-            #pragma region // Original Processing of 0x31B (ESP Chassis Movements) 
-
-            ESP_24_t esp24 = parse_ESP_24(fromABS_frame);
-            // MQB_ESP24_0x31B_CHECKSUM ;           
-            // MQB_ESP24_0x31B_COUNTER ;            
-            MQB_ESP24_0x31B_VehicleSpeed = esp24.ESP24_VehicleSpeed;       
-            MQB_ESP24_0x31B_ESP24UnknownByte4 = esp24.ESP24_UnknownByte4;  
-            MQB_ESP24_0x31B_WheelRotationCounter = esp24.ESP24_WheelRotationCounter;
-
-            #pragma endregion
-
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
-
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x31B_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-
-                        ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
-                        ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
-                        ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
-
-                        LC_BumpIn_0xFD_CallbackRecorded = 1;
-
-                }
-
-
-                #pragma endregion
-
-            #pragma region // Execute either Unmodified or Modified callback 
-
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x31B_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent UNmodified frame to 0xFD...");
-                    // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-
-                }
-
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x31B_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          CAN_message_t modFrame_0x31B;
-                          modFrame_0x31B = fromABS_frame;
-
-                          modFrame_0x31B.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0x31B.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0x31B.buf[2] = 0x00;
-                          modFrame_0x31B.buf[3] = 0x00;
-                          modFrame_0x31B.buf[4] = 0x00;
-                          modFrame_0x31B.buf[5] = ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf5;
-                          modFrame_0x31B.buf[6] = ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf6;
-                          modFrame_0x31B.buf[7] = 0x00;
-
-
-
-                          bool hit = build_frame_with_checksum_0x31B(modFrame_0x31B.buf);
-
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
-
-                          // TFTCAN2.write(modFrame_0x31B);
-                          TFTCAN2.write(fromABS_frame);
-
-                            // Serial.println("Sent MODIFIED frame to 0x31B...");
-                            // Serial.print("LC_BumpIn_0x31B_CallbackRecorded: "); Serial.print(LC_BumpIn_0x31B_CallbackRecorded); Serial.println("\t");                            
-                         
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                            // printFrame(modFrame_0x31B, 4); // 4 - Modified messages from CAN2, sending to CAN1
-                            // // Serial.println("---------------------------------------------------------------------------------");
-
-                      }
-                  
-
-
-                #pragma endregion
-    
-
-        }
-
-        else if (fromABS_frame.id == 0x392) { // ESP Wheel statuses
-          //  printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
-
-
-          #pragma region // Original Processing of 0x101 (ESP Chassis Movements) 
-
-
-              ESP_07_t esp07 = parse_ESP_07(fromABS_frame);
-              MQB_ESP07_0x392_RTA_HL = esp07.ESP_RTA_HL;
-              MQB_ESP07_0x392_RTA_HR = esp07.ESP_RTA_HR;
-              MQB_ESP07_0x392_RTA_VR = esp07.ESP_RTA_VR;
-              MQB_ESP07_0x392_OBD_Status = esp07.ESP_OBD_Status;
-              MQB_OBD_0x392_Wheel_Sensor_Error_HL = esp07.OBD_Wheel_Sensor_Error_HL;
-              MQB_OBD_0x392_Wheel_Sensor_Error_HR = esp07.OBD_Wheel_Sensor_Error_HR;
-              MQB_OBD_0x392_Wheel_Sensor_Error_VL = esp07.OBD_Wheel_Sensor_Error_VL;
-              MQB_OBD_0x392_Wheel_Sensor_Error_VR = esp07.OBD_Wheel_Sensor_Error_VR;
-              MQB_ESP07_0x392_MKB_Status = esp07.ESP_MKB_Status;
-              MQB_ESP07_0x392_Quattro_Drie = esp07.ESP_Quattro_Drie;
-
-            #pragma endregion
-
-          #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
-
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x392_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-
-                        ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
-                        ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
-                        ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
-
-                        LC_BumpIn_0x392_CallbackRecorded = 1;
-
-                }
-
-
-                #pragma endregion
-
-          #pragma region // Execute either Unmodified or Modified callback 
-
-
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x392_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent UNmodified frame to 0x392...");
-                    // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-
-                }
-
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x392_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          CAN_message_t modFrame_0x392;
-                          modFrame_0x392 = fromABS_frame;
-
-                          modFrame_0x392.buf[0] = fromABS_frame.buf[0];
-                          modFrame_0x392.buf[1] = fromABS_frame.buf[1];
-                          modFrame_0x392.buf[2] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf2;
-                          modFrame_0x392.buf[3] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf3;
-                          modFrame_0x392.buf[4] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf4;
-                          modFrame_0x392.buf[5] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf5;
-                          modFrame_0x392.buf[6] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf6;
-                          modFrame_0x392.buf[7] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf7;
-
-
-
-                          bool hit = build_frame_with_checksum_0x392(modFrame_0x392.buf);
-
-                          // if (hit) Serial.println("Checksum found in lookup");
-                          // else Serial.println("Checksum fallback used");
-
-                          // TFTCAN2.write(modFrame_0x392);
-                          TFTCAN2.write(fromABS_frame);
-
-                            // Serial.println("Sent MODIFIED frame to 0x392...");
-                            // Serial.print("LC_BumpIn_0x392_CallbackRecorded: "); Serial.print(LC_BumpIn_0x392_CallbackRecorded); Serial.println("\t");                            
-                           
-                            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-                            // printFrame(modFrame_0x392, 4); // 4 - Modified messages from CAN2, sending to CAN1
-                            // // // Serial.println("---------------------------------------------------------------------------------");
-
-                      }
-                  
-
-
-
-
-                #pragma endregion
-
-
-
-        }
-
-
-      // #pragma endregion
-
-
-      #pragma region // Frames with no checksum bytes  (Wheel Speed Sensors)
-
-        else if (fromABS_frame.id == 0xB2) { // Wheel Speed Sensors
-        // printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
-
-          #pragma region // Original Processing of 0xB2 (Wheel Speeds) 
-
-            ESP_19_t esp19 = parse_ESP_19(fromABS_frame);
-            MQB_ESP_0xB2_HL_Wheel_Speed_02 = esp19.ESP_HL_Wheel_Speed_02;
-            MQB_ESP_0xB2_HR_Wheel_Speed_02 = esp19.ESP_HR_Wheel_Speed_02;
-            MQB_ESP_0xB2_VL_Wheel_Speed_02 = esp19.ESP_VL_Wheel_Speed_02;
-            MQB_ESP_0xB2_VR_Wheel_Speed_02 = esp19.ESP_VR_Wheel_Speed_02;
-
-
-            WhlSpdRL_fromABS_Float_Raw = MQB_ESP_0xB2_HR_Wheel_Speed_02;
-            WhlSpdRR_fromABS_Float_Raw = MQB_ESP_0xB2_HR_Wheel_Speed_02;
-            WhlSpdFL_fromABS_Float_Raw = MQB_ESP_0xB2_VL_Wheel_Speed_02;
-            WhlSpdFR_fromABS_Float_Raw = MQB_ESP_0xB2_VR_Wheel_Speed_02;
-
-            WhlSpdRL_fromABS_Int = WhlSpdRL_fromABS_Float_Raw;
-            WhlSpdRR_fromABS_Int = WhlSpdRR_fromABS_Float_Raw;
-            WhlSpdFL_fromABS_Int = WhlSpdFL_fromABS_Float_Raw;
-            WhlSpdFR_fromABS_Int = WhlSpdFR_fromABS_Float_Raw;
-
-
-            TFT_MITM_LC_BumpIn_TrueWhlSpdRR_fromABS_canTx_16bit = ( WhlSpdRR_fromABS_Float_Raw * 1000 ) ;
-          
-
-          #pragma endregion
-
-            #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
-
-                if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 100 && MQB_ESP05_0x106_BrakePressureMPA_Float > 1 && LC_BumpIn_0xB2_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
-
-                        ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf0 = fromABS_frame.buf[0];
-                        ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
-                        ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
-                        ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
-                        ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
-                        ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
-                        ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
-                        ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
-
-                        LC_BumpIn_0xB2_CallbackRecorded = 1;
-
-                }
-
-
-                #pragma endregion
-
-            #pragma region // Execute either Unmodified or Modified callback 
-
-              if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0xB2_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
-
-                    TFTCAN2.write(fromABS_frame);
-                    // Serial.println("Sent UNmodified frame to 0xB2...");
-                    // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-
-                }
-
-                else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0xB2_CallbackRecorded == 1) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
-
-                          fromABS_frame_mod = fromABS_frame;
-
-                          fromABS_frame_mod.buf[0] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf0;
-                          fromABS_frame_mod.buf[1] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf1;
-                          fromABS_frame_mod.buf[2] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf2;
-                          fromABS_frame_mod.buf[3] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf3;
-                          fromABS_frame_mod.buf[4] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf4;
-                          fromABS_frame_mod.buf[5] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf5;
-                          fromABS_frame_mod.buf[6] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf6;
-                          fromABS_frame_mod.buf[7] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf7;
-
-
-
-                          
-                            TFTCAN2.write(fromABS_frame_mod);
-                            // Serial.println("Sent MODIFIED frame to 0xB2...");
-                            // printFrame(fromABS_frame_mod, 4); // 4 - Modified messages from CAN2, sending to CAN1
-
-                      }
-                  
-
-
-                #pragma endregion
-     
-
-
-
-
-        }
-
-        #pragma endregion
-
-      
-        else { // Execute FIFO Callback of Unmodified frames
-
-            TFTCAN2.write(fromABS_frame);
-            // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-
-        }
-
-
-    #pragma region // Determine LC Bump-In Activation Status (using CC Stalk from CAN1, and then using BrakePressure from CAN2)
-
-            if (LC_BumpIn_ActivationStatus == 0 && MQB_ESP05_0x106_BrakePressureMPA_Float > 1 && LC_BumpIn_AcceptableConditions == 1 && LC_BumpIn_ActivationButton == 1 ) {
+    //                 #pragma endregion
+            
               
-                  LC_BumpIn_ActivationStatus = 1;
-                  LC_BumpIn_TimeSinceActivation = 0;
-                  Serial.println("LC_BumpIn_ActivationStatus activating....");
+    //       }
 
-                  
-              }
+    //         else if (fromABS_frame.id == 0x116){ // ESP_10 Drivetrain/Brakes
+    //               // printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
 
-              else if( LC_BumpIn_ActivationButton == 0 ) {
+    //             #pragma region // Original Processing of 0x116 (ESP Chassis Movements) 
 
-                  LC_BumpIn_ActivationStatus = 0;
-                  // LC_BumpIn_TimeSinceActivation = 0;
-                  LC_BumpIn_0x101_CallbackRecorded = 0;
-                  LC_BumpIn_0x104_CallbackRecorded = 0;
-                  LC_BumpIn_0x106_CallbackRecorded = 0;
-                  LC_BumpIn_0x116_CallbackRecorded = 0;
-                  LC_BumpIn_0x11E_CallbackRecorded = 0;
-                  LC_BumpIn_0x1AB_CallbackRecorded = 0;
-                  LC_BumpIn_0x31B_CallbackRecorded = 0;
-                  LC_BumpIn_0x392_CallbackRecorded = 0;
-                  LC_BumpIn_0x3C8_CallbackRecorded = 0;
-                  LC_BumpIn_0xB2_CallbackRecorded = 0;
-                  LC_BumpIn_0xFD_CallbackRecorded = 0;
-                }
 
-              if(LC_BumpIn_ActivationButton == 0 ) {
+    //                 ESP_10_t esp10 = parse_ESP_10(fromABS_frame);
+    //                 MQB_ESP10_0x116_HL_Direction_of_Travel = esp10.ESP_HL_Direction_of_Travel;
+    //                 MQB_ESP10_0x116_HR_Direction_of_Travel = esp10.ESP_HR_Direction_of_Travel;
+    //                 MQB_ESP10_0x116_VL_Direction_of_Travel = esp10.ESP_VL_Direction_of_Travel;
+    //                 MQB_ESP10_0x116_VR_Direction_of_Travel = esp10.ESP_VR_Direction_of_Travel;
+    //                 MQB_ESP10_0x116_Path_Impulse_HL = esp10.ESP_Path_Impulse_HL;
+    //                 MQB_ESP10_0x116_Path_Impulse_HR = esp10.ESP_Path_Impulse_HR;
+    //                 MQB_ESP10_0x116_Path_Impulse_VL = esp10.ESP_Path_Impulse_VL;
+    //                 MQB_ESP10_0x116_Path_Impulse_VR = esp10.ESP_Path_Impulse_VR;
 
-                  LC_BumpIn_ActivationStatus = 0;
-                  // LC_BumpIn_TimeSinceActivation = 0;
+    //             #pragma endregion
 
-                  LC_BumpIn_0x101_CallbackRecorded = 0;
-                  LC_BumpIn_0x104_CallbackRecorded = 0;
-                  LC_BumpIn_0x106_CallbackRecorded = 0;
-                  LC_BumpIn_0x116_CallbackRecorded = 0;
-                  LC_BumpIn_0x11E_CallbackRecorded = 0;
-                  LC_BumpIn_0x1AB_CallbackRecorded = 0;
-                  LC_BumpIn_0x31B_CallbackRecorded = 0;
-                  LC_BumpIn_0x392_CallbackRecorded = 0;
-                  LC_BumpIn_0x3C8_CallbackRecorded = 0;
-                  LC_BumpIn_0xB2_CallbackRecorded = 0;
-                  LC_BumpIn_0xFD_CallbackRecorded = 0;
-                }
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
 
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x116_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+
+    //                         ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
+    //                         ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
+    //                         ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
+
+    //                         LC_BumpIn_0x116_CallbackRecorded = 1;
+
+    //                 }
+
+
+    //                 #pragma endregion
+
+    //             #pragma region // Execute either Unmodified or Modified callback 
+
+
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x116_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent UNmodified frame to 0x116...");
+    //                     // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+
+    //                 }
+
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x116_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           CAN_message_t modFrame_0x116;
+    //                           modFrame_0x116 = fromABS_frame;
+
+    //                           // modFrame_0x116.buf[0] = fromABS_frame.buf[0];
+    //                           // modFrame_0x116.buf[1] = fromABS_frame.buf[1];
+    //                           // modFrame_0x116.buf[2] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2;
+    //                           // modFrame_0x116.buf[3] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3;
+    //                           // modFrame_0x116.buf[4] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4;
+    //                           // modFrame_0x116.buf[5] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5;
+    //                           // modFrame_0x116.buf[6] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6;
+    //                           // modFrame_0x116.buf[7] = ESP_0x116_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7;
+
+    //                           modFrame_0x116.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0x116.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0x116.buf[2] = fromABS_frame.buf[2];
+    //                           modFrame_0x116.buf[3] = fromABS_frame.buf[3];
+    //                           modFrame_0x116.buf[4] = fromABS_frame.buf[4];
+    //                           modFrame_0x116.buf[5] = fromABS_frame.buf[5];
+    //                           modFrame_0x116.buf[6] = fromABS_frame.buf[6];
+    //                           modFrame_0x116.buf[7] = fromABS_frame.buf[7];
+
+
+    //                           bool hit = build_frame_with_checksum_0x116(modFrame_0x116.buf);
+
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
+
+    //                           // TFTCAN2.write(modFrame_0x116);
+    //                           TFTCAN2.write(fromABS_frame);
+
+    //                             // Serial.println("Sent MODIFIED frame to 0x116...");
+    //                             // Serial.print("LC_BumpIn_0x116_CallbackRecorded: "); Serial.print(LC_BumpIn_0x116_CallbackRecorded); Serial.println("\t");                            
+                              
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(modFrame_0x116, 4); // 4 - Modified messages from CAN2, sending to CAN1
+
+    //                             // // // Serial.println("---------------------------------------------------------------------------------");
+
+    //                       }
+                      
+
+
+
+    //                 #pragma endregion
+
+
+
+    //             }
+
+    //         else if (fromABS_frame.id == 0x11E){ // ESP_08Chassis Movements - velocity, direction of travel, etc
+    //               // printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
+
+
+    //             #pragma region // Original Processing of 0x101 (ESP Chassis Movements) 
+
+
+    //                 ESP_08_t esp08 = parse_ESP_08(fromABS_frame);
+    //                 MQB_ESP08_0x11E_Slipping_Stillstand = esp08.ESP_Slipping_Stillstand;
+    //                 MQB_ESP08_0x11E_StandStillPhase_Exhausted = esp08.ESP_StandStillPhase_Exhausted;
+    //                 MQB_ESP08_0x11E_VehicleSpeed_ref_Direction_Of_Travel = esp08.ESP_v_ref_Direction_Of_Travel;
+    //                 MQB_ESP08_0x11E_VehicleSpeed_ref = esp08.ESP_v_ref;
+    //                 MQB_ESC_0x11E_Brake_Pressure_Gradient = esp08.ESC_Brake_Pressure_Gradient;
+
+    //             #pragma endregion
+
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x11E_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+
+    //                         // ESP_0x1AB_Statuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
+    //                         ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
+    //                         ESP_0x11E_Statuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
+
+    //                         LC_BumpIn_0x11E_CallbackRecorded = 1;
+
+    //                 }
+
+
+    //                 #pragma endregion
+
+    //             #pragma region // Execute either Unmodified or Modified callback 
+
+
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x11E_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent UNmodified frame to 0x11E...");
+    //                     // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                           // debug_print_frame_CAN2_Rx_with_checksum(fromABS_frame);
+    //                           // debug_print_frame_CAN1_Tx_with_checksum(fromABS_frame_mod);
+
+    //                 }
+
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x11E_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           CAN_message_t modFrame_0x11E;
+    //                           modFrame_0x11E = fromABS_frame;
+
+    //                           modFrame_0x11E.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0x11E.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0x11E.buf[2] = 0x00;
+    //                           modFrame_0x11E.buf[3] = 0x00;
+    //                           modFrame_0x11E.buf[4] = 0x00;
+    //                           modFrame_0x11E.buf[5] = 0x00;
+    //                           modFrame_0x11E.buf[6] = 0x00;
+    //                           modFrame_0x11E.buf[7] = 0x00;  
+
+
+
+    //                           bool hit = build_frame_with_checksum_0x11E(modFrame_0x11E.buf);
+
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
+
+    //                           // TFTCAN2.write(modFrame_0x11E);
+    //                           TFTCAN2.write(fromABS_frame);
+
+    //                             // Serial.println("Sent MODIFIED frame to 0x11E...");
+    //                             // Serial.print("LC_BumpIn_0x11E_CallbackRecorded: "); Serial.print(LC_BumpIn_0x11E_CallbackRecorded); Serial.println("\t");                            
+                            
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(modFrame_0x11E, 4); // 4 - Modified messages from CAN2, sending to CAN1
+
+    //                             // // // Serial.println("---------------------------------------------------------------------------------");
+
+    //                       }
+                      
+
+
+
+    //                 #pragma endregion
+
+
+
+
+    //             }
+
+    //         else if (fromABS_frame.id == 0x1AB){ // Brake Pedal Switch
+
+              
+    //             #pragma region // Original Processing of 0xAB (ESP Brake Pedal Switch)
+
+    //                   Susp_CAN_msg0x1AB_FromABS_buf0_Raw = fromABS_frame.buf[0];
+    //                   Susp_CAN_msg0x1AB_FromABS_buf1_Raw = fromABS_frame.buf[1];
+    //                   Susp_CAN_msg0x1AB_FromABS_buf2_Raw = fromABS_frame.buf[2];
+    //                   Susp_CAN_msg0x1AB_FromABS_buf3_Raw = fromABS_frame.buf[3];
+    //                   Susp_CAN_msg0x1AB_FromABS_buf4_Raw = fromABS_frame.buf[4];
+    //                   Susp_CAN_msg0x1AB_FromABS_buf5_Raw = fromABS_frame.buf[5];
+    //                   Susp_CAN_msg0x1AB_FromABS_buf6_Raw = fromABS_frame.buf[6];
+    //                   Susp_CAN_msg0x1AB_FromABS_buf7_Raw = fromABS_frame.buf[7];  
+
+    //                 BrakeSwitch_0x1AB_CAN_FromABS = Susp_CAN_msg0x1AB_FromABS_buf6_Raw;
+    //                 BrakeSwitch_0x1AB_FromABS = BrakeSwitch_0x1AB_CAN_FromABS; // When pedal is not pressed, byte6 is 0x04.  When pedal is pressed, byte6 is 0x05
+
+    //                 if(BrakeSwitch_0x1AB_FromABS == 4) {
+    //                 BrakePedalSwitchStatus_FromABS = 0;
+    //                 }
+    //                 else if(BrakeSwitch_0x1AB_FromABS == 5) {
+    //                 BrakePedalSwitchStatus_FromABS = 1;
+    //                 }
+    //               // Serial.print("BrakeSwitch_0x1AB_FromABS: ");  Serial.print(BrakeSwitch_0x1AB_FromABS);  
+    //               // Serial.println();
+    //               // Serial.print("BrakePedalSwitchStatus_FromABS: ");  Serial.print(BrakePedalSwitchStatus_FromABS);  
+    //               // Serial.println();
+    //                 // TFTCAN2.write(fromABS_frame);                                       //forwarding from TFTCAN1 (ABS origin) to TFTCAN2 (Gateway)
+
+    //               #pragma endregion
+
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x1AB_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+
+    //                         ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3]; // Should be 0x2 when brake is pressed
+    //                         ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; // Shoiuld be 0x5 when brake is pressed
+    //                         ESP_0x1AB_BrakeStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
+
+    //                         LC_BumpIn_0x1AB_CallbackRecorded = 1;
+
+    //                 }
+
+
+    //                 #pragma endregion
+
+    //             #pragma region // Execute either Unmodified or Modified callback 
+
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x1AB_CallbackRecorded == 0 ) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent UNmodified frame to 0x1AB...");
+    //                     // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+
+    //                 }
+              
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x1AB_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           CAN_message_t modFrame_0x1AB;
+    //                           modFrame_0x1AB = fromABS_frame;
+
+    //                           modFrame_0x1AB.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0x1AB.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0x1AB.buf[2] = 0x00;
+    //                           modFrame_0x1AB.buf[3] = 0x02;
+    //                           modFrame_0x1AB.buf[4] = 0x00;
+    //                           modFrame_0x1AB.buf[5] = 0x00;
+    //                           modFrame_0x1AB.buf[6] = 0x05;
+    //                           modFrame_0x1AB.buf[7] = 0x00;  
+
+
+
+    //                           bool hit = build_frame_with_checksum_0x1AB(modFrame_0x1AB.buf);
+
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
+
+    //                           TFTCAN2.write(modFrame_0x1AB);
+    //                           // TFTCAN2.write(fromABS_frame);
+
+    //                           // Serial.println("Sent MODIFIED frame to 0x1AB...");
+    //                             // Serial.print("LC_BumpIn_0x1AB_CallbackRecorded: "); Serial.print(LC_BumpIn_0x1AB_CallbackRecorded); Serial.println("\t");                            
+                            
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)                         
+    //                             // printFrame(modFrame_0x1AB, 4); // 4 - Modified messages from CAN2, sending to CAN1
+
+    //                             // // // Serial.println("---------------------------------------------------------------------------------");
+
+    //                       }
+                      
+
+    //                 #pragma endregion
+
+
+
+    //               }
+
+    //         else if (fromABS_frame.id == 0x31B) { // ESP_24 - Vehicle speed and wheel rotation counter
+
+    //             #pragma region // Original Processing of 0x31B (ESP Chassis Movements) 
+
+    //             ESP_24_t esp24 = parse_ESP_24(fromABS_frame);
+    //             // MQB_ESP24_0x31B_CHECKSUM ;           
+    //             // MQB_ESP24_0x31B_COUNTER ;            
+    //             MQB_ESP24_0x31B_VehicleSpeed = esp24.ESP24_VehicleSpeed;       
+    //             MQB_ESP24_0x31B_ESP24UnknownByte4 = esp24.ESP24_UnknownByte4;  
+    //             MQB_ESP24_0x31B_WheelRotationCounter = esp24.ESP24_WheelRotationCounter;
+
+    //             #pragma endregion
+
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x31B_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+
+    //                         ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
+    //                         ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
+    //                         ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
+
+    //                         LC_BumpIn_0xFD_CallbackRecorded = 1;
+
+    //                 }
+
+
+    //                 #pragma endregion
+
+    //             #pragma region // Execute either Unmodified or Modified callback 
+
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x31B_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent UNmodified frame to 0xFD...");
+    //                     // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+
+    //                 }
+
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x31B_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           CAN_message_t modFrame_0x31B;
+    //                           modFrame_0x31B = fromABS_frame;
+
+    //                           modFrame_0x31B.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0x31B.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0x31B.buf[2] = 0x00;
+    //                           modFrame_0x31B.buf[3] = 0x00;
+    //                           modFrame_0x31B.buf[4] = 0x00;
+    //                           modFrame_0x31B.buf[5] = ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf5;
+    //                           modFrame_0x31B.buf[6] = ESP_0x31B_Statuses_atTimeof_LCBumpInActivation_Int_buf6;
+    //                           modFrame_0x31B.buf[7] = 0x00;
+
+
+
+    //                           bool hit = build_frame_with_checksum_0x31B(modFrame_0x31B.buf);
+
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
+
+    //                           // TFTCAN2.write(modFrame_0x31B);
+    //                           TFTCAN2.write(fromABS_frame);
+
+    //                             // Serial.println("Sent MODIFIED frame to 0x31B...");
+    //                             // Serial.print("LC_BumpIn_0x31B_CallbackRecorded: "); Serial.print(LC_BumpIn_0x31B_CallbackRecorded); Serial.println("\t");                            
+                            
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(modFrame_0x31B, 4); // 4 - Modified messages from CAN2, sending to CAN1
+    //                             // // Serial.println("---------------------------------------------------------------------------------");
+
+    //                       }
+                      
+
+
+    //                 #pragma endregion
+        
+
+    //         }
+
+    //         else if (fromABS_frame.id == 0x392) { // ESP Wheel statuses
+    //           //  printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
+
+
+    //           #pragma region // Original Processing of 0x101 (ESP Chassis Movements) 
+
+
+    //               ESP_07_t esp07 = parse_ESP_07(fromABS_frame);
+    //               MQB_ESP07_0x392_RTA_HL = esp07.ESP_RTA_HL;
+    //               MQB_ESP07_0x392_RTA_HR = esp07.ESP_RTA_HR;
+    //               MQB_ESP07_0x392_RTA_VR = esp07.ESP_RTA_VR;
+    //               MQB_ESP07_0x392_OBD_Status = esp07.ESP_OBD_Status;
+    //               MQB_OBD_0x392_Wheel_Sensor_Error_HL = esp07.OBD_Wheel_Sensor_Error_HL;
+    //               MQB_OBD_0x392_Wheel_Sensor_Error_HR = esp07.OBD_Wheel_Sensor_Error_HR;
+    //               MQB_OBD_0x392_Wheel_Sensor_Error_VL = esp07.OBD_Wheel_Sensor_Error_VL;
+    //               MQB_OBD_0x392_Wheel_Sensor_Error_VR = esp07.OBD_Wheel_Sensor_Error_VR;
+    //               MQB_ESP07_0x392_MKB_Status = esp07.ESP_MKB_Status;
+    //               MQB_ESP07_0x392_Quattro_Drie = esp07.ESP_Quattro_Drie;
+
+    //             #pragma endregion
+
+    //           #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 500 && MQB_ESP05_0x106_BrakePressureMPA_Float > 3 && LC_BumpIn_0x392_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+
+    //                         ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
+    //                         ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
+    //                         ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
+
+    //                         LC_BumpIn_0x392_CallbackRecorded = 1;
+
+    //                 }
+
+
+    //                 #pragma endregion
+
+    //           #pragma region // Execute either Unmodified or Modified callback 
+
+
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0x392_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent UNmodified frame to 0x392...");
+    //                     // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+
+    //                 }
+
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0x392_CallbackRecorded == 1 ) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           CAN_message_t modFrame_0x392;
+    //                           modFrame_0x392 = fromABS_frame;
+
+    //                           modFrame_0x392.buf[0] = fromABS_frame.buf[0];
+    //                           modFrame_0x392.buf[1] = fromABS_frame.buf[1];
+    //                           modFrame_0x392.buf[2] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf2;
+    //                           modFrame_0x392.buf[3] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf3;
+    //                           modFrame_0x392.buf[4] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf4;
+    //                           modFrame_0x392.buf[5] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf5;
+    //                           modFrame_0x392.buf[6] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf6;
+    //                           modFrame_0x392.buf[7] = ESP_0x392_Statuses_atTimeof_LCBumpInActivation_Int_buf7;
+
+
+
+    //                           bool hit = build_frame_with_checksum_0x392(modFrame_0x392.buf);
+
+    //                           // if (hit) Serial.println("Checksum found in lookup");
+    //                           // else Serial.println("Checksum fallback used");
+
+    //                           // TFTCAN2.write(modFrame_0x392);
+    //                           TFTCAN2.write(fromABS_frame);
+
+    //                             // Serial.println("Sent MODIFIED frame to 0x392...");
+    //                             // Serial.print("LC_BumpIn_0x392_CallbackRecorded: "); Serial.print(LC_BumpIn_0x392_CallbackRecorded); Serial.println("\t");                            
+                              
+    //                             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    //                             // printFrame(modFrame_0x392, 4); // 4 - Modified messages from CAN2, sending to CAN1
+    //                             // // // Serial.println("---------------------------------------------------------------------------------");
+
+    //                       }
+                      
+
+
+
+
+    //                 #pragma endregion
+
+
+
+    //         }
+
+
+    //       // #pragma endregion
+
+
+    //       #pragma region // Frames with no checksum bytes  (Wheel Speed Sensors)
+
+    //         else if (fromABS_frame.id == 0xB2) { // Wheel Speed Sensors
+    //         // printFrame(fromABS_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
+
+    //           #pragma region // Original Processing of 0xB2 (Wheel Speeds) 
+
+    //             ESP_19_t esp19 = parse_ESP_19(fromABS_frame);
+    //             MQB_ESP_0xB2_HL_Wheel_Speed_02 = esp19.ESP_HL_Wheel_Speed_02;
+    //             MQB_ESP_0xB2_HR_Wheel_Speed_02 = esp19.ESP_HR_Wheel_Speed_02;
+    //             MQB_ESP_0xB2_VL_Wheel_Speed_02 = esp19.ESP_VL_Wheel_Speed_02;
+    //             MQB_ESP_0xB2_VR_Wheel_Speed_02 = esp19.ESP_VR_Wheel_Speed_02;
+
+
+    //             WhlSpdRL_fromABS_Float_Raw = MQB_ESP_0xB2_HR_Wheel_Speed_02;
+    //             WhlSpdRR_fromABS_Float_Raw = MQB_ESP_0xB2_HR_Wheel_Speed_02;
+    //             WhlSpdFL_fromABS_Float_Raw = MQB_ESP_0xB2_VL_Wheel_Speed_02;
+    //             WhlSpdFR_fromABS_Float_Raw = MQB_ESP_0xB2_VR_Wheel_Speed_02;
+
+    //             WhlSpdRL_fromABS_Int = WhlSpdRL_fromABS_Float_Raw;
+    //             WhlSpdRR_fromABS_Int = WhlSpdRR_fromABS_Float_Raw;
+    //             WhlSpdFL_fromABS_Int = WhlSpdFL_fromABS_Float_Raw;
+    //             WhlSpdFR_fromABS_Int = WhlSpdFR_fromABS_Float_Raw;
+
+
+    //             TFT_MITM_LC_BumpIn_TrueWhlSpdRR_fromABS_canTx_16bit = ( WhlSpdRR_fromABS_Float_Raw * 1000 ) ;
+              
+
+    //           #pragma endregion
+
+    //             #pragma region // Determine LC Bump-In Activation Status and record values at time of activation
+
+    //                 if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_TimeSinceActivation < 100 && MQB_ESP05_0x106_BrakePressureMPA_Float > 1 && LC_BumpIn_0xB2_CallbackRecorded == 0)  { // Trigger the start of LC BumpIn Activation , which records the initial brake pressure at time of overriding
+
+    //                         ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf0 = fromABS_frame.buf[0];
+    //                         ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf1 = fromABS_frame.buf[1];
+    //                         ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf2 = fromABS_frame.buf[2];
+    //                         ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf3 = fromABS_frame.buf[3];
+    //                         ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf4 = fromABS_frame.buf[4];
+    //                         ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf5 = fromABS_frame.buf[5];
+    //                         ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf6 = fromABS_frame.buf[6]; 
+    //                         ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf7 = fromABS_frame.buf[7];
+
+    //                         LC_BumpIn_0xB2_CallbackRecorded = 1;
+
+    //                 }
+
+
+    //                 #pragma endregion
+
+    //             #pragma region // Execute either Unmodified or Modified callback 
+
+    //               if (LC_BumpIn_ActivationStatus == 0 || LC_BumpIn_0xB2_CallbackRecorded == 0) {  // Send unmodified frame if LC_BumpIn_ActivationStatus is NOT Active
+
+    //                     TFTCAN2.write(fromABS_frame);
+    //                     // Serial.println("Sent UNmodified frame to 0xB2...");
+    //                     // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+
+    //                 }
+
+    //                 else if(LC_BumpIn_ActivationStatus == 1 && LC_BumpIn_0xB2_CallbackRecorded == 1) { // Send modified frame if LC_BumpIn_ActivationStatus IS Active
+
+    //                           fromABS_frame_mod = fromABS_frame;
+
+    //                           fromABS_frame_mod.buf[0] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf0;
+    //                           fromABS_frame_mod.buf[1] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf1;
+    //                           fromABS_frame_mod.buf[2] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf2;
+    //                           fromABS_frame_mod.buf[3] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf3;
+    //                           fromABS_frame_mod.buf[4] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf4;
+    //                           fromABS_frame_mod.buf[5] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf5;
+    //                           fromABS_frame_mod.buf[6] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf6;
+    //                           fromABS_frame_mod.buf[7] = ESP_0xB2_WheelSpeedStatuses_atTimeof_LCBumpInActivation_Int_buf7;
+
+
+
+                              
+    //                             TFTCAN2.write(fromABS_frame_mod);
+    //                             // Serial.println("Sent MODIFIED frame to 0xB2...");
+    //                             // printFrame(fromABS_frame_mod, 4); // 4 - Modified messages from CAN2, sending to CAN1
+
+    //                       }
+                      
+
+
+    //                 #pragma endregion
         
 
 
-      // if(WhlSpdRR_fromABS_Int < 10) { // Initial Determination of "Acceptable Conditions" for LC BumpIn Activation
 
-      //     LC_BumpIn_AcceptableConditions = 1;
 
-      // }
+    //         }
 
-      //   else {
-      //     LC_BumpIn_AcceptableConditions = 0;
-      //     }
+    //         #pragma endregion
 
+          
+    //         else { // Execute FIFO Callback of Unmodified frames
+
+    //             TFTCAN2.write(fromABS_frame);
+    //             // printFrame(fromABS_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+
+    //         }
+
+
+    //     #pragma region // Determine LC Bump-In Activation Status (using CC Stalk from CAN1, and then using BrakePressure from CAN2)
+
+    //             if (LC_BumpIn_ActivationStatus == 0 && MQB_ESP05_0x106_BrakePressureMPA_Float > 1 && LC_BumpIn_AcceptableConditions == 1 && LC_BumpIn_ActivationButton == 1 ) {
+                  
+    //                   LC_BumpIn_ActivationStatus = 1;
+    //                   LC_BumpIn_TimeSinceActivation = 0;
+    //                   Serial.println("LC_BumpIn_ActivationStatus activating....");
+
+                      
+    //               }
+
+    //               else if( LC_BumpIn_ActivationButton == 0 ) {
+
+    //                   LC_BumpIn_ActivationStatus = 0;
+    //                   // LC_BumpIn_TimeSinceActivation = 0;
+    //                   LC_BumpIn_0x101_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x104_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x106_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x116_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x11E_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x1AB_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x31B_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x392_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x3C8_CallbackRecorded = 0;
+    //                   LC_BumpIn_0xB2_CallbackRecorded = 0;
+    //                   LC_BumpIn_0xFD_CallbackRecorded = 0;
+    //                 }
+
+    //               if(LC_BumpIn_ActivationButton == 0 ) {
+
+    //                   LC_BumpIn_ActivationStatus = 0;
+    //                   // LC_BumpIn_TimeSinceActivation = 0;
+
+    //                   LC_BumpIn_0x101_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x104_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x106_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x116_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x11E_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x1AB_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x31B_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x392_CallbackRecorded = 0;
+    //                   LC_BumpIn_0x3C8_CallbackRecorded = 0;
+    //                   LC_BumpIn_0xB2_CallbackRecorded = 0;
+    //                   LC_BumpIn_0xFD_CallbackRecorded = 0;
+    //                 }
 
             
-      #pragma endregion
 
 
-    }
- }
+    //       // if(WhlSpdRR_fromABS_Int < 10) { // Initial Determination of "Acceptable Conditions" for LC BumpIn Activation
 
-  // Poll TFTCAN2 (Wired to Gateway)
-void loop_TFTCAN2_poll_MITM_ABS() {
-  CAN_message_t fromGateway_frame;
-  CAN_message_t fromGateway_frame_mod;
+    //       //     LC_BumpIn_AcceptableConditions = 1;
 
-  // CAN1 → CAN2
-  while (TFTCAN2.read(fromGateway_frame)) {
-    TFTCAN1.write(fromGateway_frame);
+    //       // }
+
+    //       //   else {
+    //       //     LC_BumpIn_AcceptableConditions = 0;
+    //       //     }
 
 
-    // fromGateway_frame_mod = fromGateway_frame;
-    // user_modify_payload(fromGateway_frame.id, fromGateway_frame.buf, false);
-
-    // uint8_t payload7[7];
-    // extract_payload7(fromGateway_frame.buf, payload7);
-
-    // uint8_t newb0;
-    // if (checksum_update_byte0(fromGateway_frame.id, payload7, &newb0))
-    //   fromGateway_frame.buf[0] = newb0;
-
-
-
-// ---------------------------------------------------------------------------------------------------------------
-
-#pragma region // Process incoming CAN frames 
-
-
-
-        if(fromGateway_frame.id == 0x120){ // Cruise stalk static position
-        // // printFrame(fromGateway_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
-
-        //       Susp_CAN_msg0x120_FromGateway_buf0_Raw = fromGateway_frame.buf[0];
-        //       Susp_CAN_msg0x120_FromGateway_buf1_Raw = fromGateway_frame.buf[1];
-        //       Susp_CAN_msg0x120_FromGateway_buf2_Raw = fromGateway_frame.buf[2];
-        //       Susp_CAN_msg0x120_FromGateway_buf3_Raw = fromGateway_frame.buf[3];
-        //       Susp_CAN_msg0x120_FromGateway_buf4_Raw = fromGateway_frame.buf[4];
-        //       Susp_CAN_msg0x120_FromGateway_buf5_Raw = fromGateway_frame.buf[5];
-        //       Susp_CAN_msg0x120_FromGateway_buf6_Raw = fromGateway_frame.buf[6];
-        //       Susp_CAN_msg0x120_FromGateway_buf7_Raw = fromGateway_frame.buf[7];  
-
-        //        cruiseStalkStaticPosition_0x120_FromGatewayCAN = Susp_CAN_msg0x120_FromGateway_buf3_Raw;
-        //        cruiseStalkStaticPosition_0x120_FromGateway = cruiseStalkStaticPosition_0x120_FromGatewayCAN;
-
-
-        //        if(cruiseStalkStaticPosition_0x120_FromGateway == 0 ) { // 0x06/ Dec 6 = cruise Stalk in Static ON position, no button pressed
-        //           CruiseStalk_ON_FromGateway = 0;
-        //           CruiseStalk_OFF_FromGateway = 1;
-
-        //           LC_BumpIn_ActivationButton = 1;
-
-        //           }
-
-        //        else{ //  = cruise Stalk in Static ON position, no button pressed
-        //           CruiseStalk_ON_FromGateway = 1;
-        //           CruiseStalk_OFF_FromGateway = 0;
-
-        //           LC_BumpIn_ActivationButton = 0;
-
-        //           }
-
-
-
-
-              // TFTCAN1.write(fromGateway_frame);                                       //forwarding from TFTCAN2 (Gateway origin) to TFTCAN1 (ABS Node)
-
-            }
-
-        else if(fromGateway_frame.id == 0x391){
-
-                // Susp_CAN_msg0x391_FromGateway_buf0_Raw = fromGateway_frame.buf[0];
-                // Susp_CAN_msg0x391_FromGateway_buf1_Raw = fromGateway_frame.buf[1];
-                // Susp_CAN_msg0x391_FromGateway_buf2_Raw = fromGateway_frame.buf[2];
-                // Susp_CAN_msg0x391_FromGateway_buf3_Raw = fromGateway_frame.buf[3];
-                // Susp_CAN_msg0x391_FromGateway_buf4_Raw = fromGateway_frame.buf[4];
-                // Susp_CAN_msg0x391_FromGateway_buf5_Raw = fromGateway_frame.buf[5];
-                // Susp_CAN_msg0x391_FromGateway_buf6_Raw = fromGateway_frame.buf[6];
-                // Susp_CAN_msg0x391_FromGateway_buf7_Raw = fromGateway_frame.buf[7];  
-
-
-            //   ThrottleTPS_0x391_FromGatewayCAN = Susp_CAN_msg0x391_FromGateway_buf2_Raw;
-            //   ThrottleTPS_0x391_FromGateway_Float = (ThrottleTPS_0x391_FromGatewayCAN * 0.39215686275 ) ;
-
-            //   ThrottleTPS_0x391_FromGateway_Mapped_Float = map(ThrottleTPS_0x391_FromGateway_Float,10,85,0,100);
-            //   ThrottleTPS_0x391_FromGateway_Mapped_Int = ThrottleTPS_0x391_FromGateway_Mapped_Float;
-            //   ThrottleTPS_0x391_FromGateway_Mapped_Int = constrain(ThrottleTPS_0x391_FromGateway_Mapped_Int,0,100);
-            //   ThrottleTPS_0x391_FromGateway_Mapped_Int = ThrottleTPS_0x391_FromGateway_Mapped_Int;
-
-
-            //   AccelPedal_0x391_FromGateway_CAN = Susp_CAN_msg0x391_FromGateway_buf5_Raw;
-            //   AccelPedal_0x391_FromGateway_Mapped_Float = (AccelPedal_0x391_FromGateway_CAN * 0.39215686275 ) ;
-
-            //   AccelPedal_0x391_FromGateway_Mapped_Float = map(AccelPedal_0x391_FromGateway_Mapped_Float,15,80,0,100);
-            //   AccelPedal_0x391_FromGateway_Mapped_Int = AccelPedal_0x391_FromGateway_Mapped_Float;
-            //   AccelPedal_0x391_FromGateway_Mapped_Int = constrain(AccelPedal_0x391_FromGateway_Mapped_Int,0,100);
-            //   // AccelPedal_0x391_FromGateway_Mapped_Float = AccelPedal_0x391_FromGateway_Mapped_Int;
-
-            // // Serial.print("ThrottleTPS_0x391: ");
-            // // Serial.print(ThrottleTPS_0x391);
-            // // Serial.print("AccelPedal_0x391_FromGateway_Mapped: ");
-            // // Serial.print(AccelPedal_0x391_FromGateway_Mapped);
-            // // Serial.println();
-
-            // // Serial.println();
                 
-            }
-
-        else if(fromGateway_frame.id == 0x11E){ // Drivetrain/Brakes
-        // // printFrame(fromGateway_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
-        //   ESP_08_t esp = parse_ESP_08(fromGateway_frame);
-        //   MQB_ESP08_0x11E_Slipping_Stillstand = esp.ESP_Slipping_Stillstand;
-        //   MQB_ESP08_0x11E_StandStillPhase_Exhausted = esp.ESP_StandStillPhase_Exhausted;
-        //   MQB_ESP08_0x11E_VehicleSpeed_ref_Direction_Of_Travel = esp.ESP_v_ref_Direction_Of_Travel;
-        //   MQB_ESP08_0x11E_VehicleSpeed_ref = esp.ESP_v_ref;
-
-            }
-
-        else if(fromGateway_frame.id == 0x3C8){ // Gearbox Statuses
-          Getriebe_14_t ge14 = parse_Getriebe_14(fromGateway_frame);
-
-          MQB_GE_0x3C8_amax_Possible = ge14.GE_amax_Possible;
-          MQB_GE_0x3C8_LaunchControl = ge14.GE_LaunchControl;
-          MQB_GE_0x3C8_Sumpftemperatur = ge14.GE_Sumpftemperatur;
-          MQB_GE_0x3C8_TorqueLoss = ge14.GE_TorqueLoss;
-          MQB_GE_0x3C8_OBD_Status = ge14.GE_OBD_Status;
-          
-        }
-
-        else if(fromGateway_frame.id == 0xB2) { // Wheel Speed Sensors
-        // printFrame(fromGateway_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
-
-            // ESP_19_t esp19 = parse_ESP_19(fromGateway_frame);
-
-            // MQB_ESP_0xB2_HL_Wheel_Speed_02 = esp19.ESP_HL_Wheel_Speed_02;
-            // MQB_ESP_0xB2_HR_Wheel_Speed_02 = esp19.ESP_HR_Wheel_Speed_02;
-            // MQB_ESP_0xB2_VL_Wheel_Speed_02 = esp19.ESP_VL_Wheel_Speed_02;
-            // MQB_ESP_0xB2_VR_Wheel_Speed_02 = esp19.ESP_VR_Wheel_Speed_02;
-
-        }
-
-        else if(fromGateway_frame.id == 0x30B) { // Kombi 
-
-          Kombi_01_t kombi_0x30B = parse_Kombi_01(fromGateway_frame);
-
-        }
-
-        else if(fromGateway_frame.id == 0x3BE) { // Motor_14
-
-           Motor_14_t mo = parse_Motor_14(fromGateway_frame);
+    //       #pragma endregion
 
 
-        }
+    //     }
+    // }
 
-        else if(fromGateway_frame.id == 0xAD) { // Kombi 
+    //   // Poll TFTCAN2 (Wired to Gateway)
+    // void loop_TFTCAN2_poll_MITM_ABS() {
+    //   CAN_message_t fromGateway_frame;
+    //   CAN_message_t fromGateway_frame_mod;
 
-            Getriebe_11_t g11 = parse_Getriebe_11(fromGateway_frame);
-
-
-        }
-
-        else if(fromGateway_frame.id == 0x31B) { // ESP_24
-
-        //     ESP_24_t esp24 = parse_ESP_24(fromGateway_frame);
+    //   // CAN1 → CAN2
+    //   while (TFTCAN2.read(fromGateway_frame)) {
+    //     TFTCAN1.write(fromGateway_frame);
 
 
-        }
+    //     // fromGateway_frame_mod = fromGateway_frame;
+    //     // user_modify_payload(fromGateway_frame.id, fromGateway_frame.buf, false);
+
+    //     // uint8_t payload7[7];
+    //     // extract_payload7(fromGateway_frame.buf, payload7);
+
+    //     // uint8_t newb0;
+    //     // if (checksum_update_byte0(fromGateway_frame.id, payload7, &newb0))
+    //     //   fromGateway_frame.buf[0] = newb0;
 
 
 
+    // // ---------------------------------------------------------------------------------------------------------------
+
+    // #pragma region // Process incoming CAN frames 
+
+
+
+    //         if(fromGateway_frame.id == 0x120){ // Cruise stalk static position
+    //         // // printFrame(fromGateway_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
+
+    //         //       Susp_CAN_msg0x120_FromGateway_buf0_Raw = fromGateway_frame.buf[0];
+    //         //       Susp_CAN_msg0x120_FromGateway_buf1_Raw = fromGateway_frame.buf[1];
+    //         //       Susp_CAN_msg0x120_FromGateway_buf2_Raw = fromGateway_frame.buf[2];
+    //         //       Susp_CAN_msg0x120_FromGateway_buf3_Raw = fromGateway_frame.buf[3];
+    //         //       Susp_CAN_msg0x120_FromGateway_buf4_Raw = fromGateway_frame.buf[4];
+    //         //       Susp_CAN_msg0x120_FromGateway_buf5_Raw = fromGateway_frame.buf[5];
+    //         //       Susp_CAN_msg0x120_FromGateway_buf6_Raw = fromGateway_frame.buf[6];
+    //         //       Susp_CAN_msg0x120_FromGateway_buf7_Raw = fromGateway_frame.buf[7];  
+
+    //         //        cruiseStalkStaticPosition_0x120_FromGatewayCAN = Susp_CAN_msg0x120_FromGateway_buf3_Raw;
+    //         //        cruiseStalkStaticPosition_0x120_FromGateway = cruiseStalkStaticPosition_0x120_FromGatewayCAN;
+
+
+    //         //        if(cruiseStalkStaticPosition_0x120_FromGateway == 0 ) { // 0x06/ Dec 6 = cruise Stalk in Static ON position, no button pressed
+    //         //           CruiseStalk_ON_FromGateway = 0;
+    //         //           CruiseStalk_OFF_FromGateway = 1;
+
+    //         //           LC_BumpIn_ActivationButton = 1;
+
+    //         //           }
+
+    //         //        else{ //  = cruise Stalk in Static ON position, no button pressed
+    //         //           CruiseStalk_ON_FromGateway = 1;
+    //         //           CruiseStalk_OFF_FromGateway = 0;
+
+    //         //           LC_BumpIn_ActivationButton = 0;
+
+    //         //           }
+
+
+
+
+    //               // TFTCAN1.write(fromGateway_frame);                                       //forwarding from TFTCAN2 (Gateway origin) to TFTCAN1 (ABS Node)
+
+    //             }
+
+    //         else if(fromGateway_frame.id == 0x391){
+
+    //                 // Susp_CAN_msg0x391_FromGateway_buf0_Raw = fromGateway_frame.buf[0];
+    //                 // Susp_CAN_msg0x391_FromGateway_buf1_Raw = fromGateway_frame.buf[1];
+    //                 // Susp_CAN_msg0x391_FromGateway_buf2_Raw = fromGateway_frame.buf[2];
+    //                 // Susp_CAN_msg0x391_FromGateway_buf3_Raw = fromGateway_frame.buf[3];
+    //                 // Susp_CAN_msg0x391_FromGateway_buf4_Raw = fromGateway_frame.buf[4];
+    //                 // Susp_CAN_msg0x391_FromGateway_buf5_Raw = fromGateway_frame.buf[5];
+    //                 // Susp_CAN_msg0x391_FromGateway_buf6_Raw = fromGateway_frame.buf[6];
+    //                 // Susp_CAN_msg0x391_FromGateway_buf7_Raw = fromGateway_frame.buf[7];  
+
+
+    //             //   ThrottleTPS_0x391_FromGatewayCAN = Susp_CAN_msg0x391_FromGateway_buf2_Raw;
+    //             //   ThrottleTPS_0x391_FromGateway_Float = (ThrottleTPS_0x391_FromGatewayCAN * 0.39215686275 ) ;
+
+    //             //   ThrottleTPS_0x391_FromGateway_Mapped_Float = map(ThrottleTPS_0x391_FromGateway_Float,10,85,0,100);
+    //             //   ThrottleTPS_0x391_FromGateway_Mapped_Int = ThrottleTPS_0x391_FromGateway_Mapped_Float;
+    //             //   ThrottleTPS_0x391_FromGateway_Mapped_Int = constrain(ThrottleTPS_0x391_FromGateway_Mapped_Int,0,100);
+    //             //   ThrottleTPS_0x391_FromGateway_Mapped_Int = ThrottleTPS_0x391_FromGateway_Mapped_Int;
+
+
+    //             //   AccelPedal_0x391_FromGateway_CAN = Susp_CAN_msg0x391_FromGateway_buf5_Raw;
+    //             //   AccelPedal_0x391_FromGateway_Mapped_Float = (AccelPedal_0x391_FromGateway_CAN * 0.39215686275 ) ;
+
+    //             //   AccelPedal_0x391_FromGateway_Mapped_Float = map(AccelPedal_0x391_FromGateway_Mapped_Float,15,80,0,100);
+    //             //   AccelPedal_0x391_FromGateway_Mapped_Int = AccelPedal_0x391_FromGateway_Mapped_Float;
+    //             //   AccelPedal_0x391_FromGateway_Mapped_Int = constrain(AccelPedal_0x391_FromGateway_Mapped_Int,0,100);
+    //             //   // AccelPedal_0x391_FromGateway_Mapped_Float = AccelPedal_0x391_FromGateway_Mapped_Int;
+
+    //             // // Serial.print("ThrottleTPS_0x391: ");
+    //             // // Serial.print(ThrottleTPS_0x391);
+    //             // // Serial.print("AccelPedal_0x391_FromGateway_Mapped: ");
+    //             // // Serial.print(AccelPedal_0x391_FromGateway_Mapped);
+    //             // // Serial.println();
+
+    //             // // Serial.println();
+                    
+    //             }
+
+    //         else if(fromGateway_frame.id == 0x11E){ // Drivetrain/Brakes
+    //         // // printFrame(fromGateway_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
+    //         //   ESP_08_t esp = parse_ESP_08(fromGateway_frame);
+    //         //   MQB_ESP08_0x11E_Slipping_Stillstand = esp.ESP_Slipping_Stillstand;
+    //         //   MQB_ESP08_0x11E_StandStillPhase_Exhausted = esp.ESP_StandStillPhase_Exhausted;
+    //         //   MQB_ESP08_0x11E_VehicleSpeed_ref_Direction_Of_Travel = esp.ESP_v_ref_Direction_Of_Travel;
+    //         //   MQB_ESP08_0x11E_VehicleSpeed_ref = esp.ESP_v_ref;
+
+    //             }
+
+    //         else if(fromGateway_frame.id == 0x3C8){ // Gearbox Statuses
+    //           Getriebe_14_t ge14 = parse_Getriebe_14(fromGateway_frame);
+
+    //           MQB_GE_0x3C8_amax_Possible = ge14.GE_amax_Possible;
+    //           MQB_GE_0x3C8_LaunchControl = ge14.GE_LaunchControl;
+    //           MQB_GE_0x3C8_Sumpftemperatur = ge14.GE_Sumpftemperatur;
+    //           MQB_GE_0x3C8_TorqueLoss = ge14.GE_TorqueLoss;
+    //           MQB_GE_0x3C8_OBD_Status = ge14.GE_OBD_Status;
+              
+    //         }
+
+    //         else if(fromGateway_frame.id == 0xB2) { // Wheel Speed Sensors
+    //         // printFrame(fromGateway_frame, 2);                                  //uncomment line to print frames received on TFTCAN2
+
+    //             // ESP_19_t esp19 = parse_ESP_19(fromGateway_frame);
+
+    //             // MQB_ESP_0xB2_HL_Wheel_Speed_02 = esp19.ESP_HL_Wheel_Speed_02;
+    //             // MQB_ESP_0xB2_HR_Wheel_Speed_02 = esp19.ESP_HR_Wheel_Speed_02;
+    //             // MQB_ESP_0xB2_VL_Wheel_Speed_02 = esp19.ESP_VL_Wheel_Speed_02;
+    //             // MQB_ESP_0xB2_VR_Wheel_Speed_02 = esp19.ESP_VR_Wheel_Speed_02;
+
+    //         }
+
+    //         else if(fromGateway_frame.id == 0x30B) { // Kombi 
+
+    //           Kombi_01_t kombi_0x30B = parse_Kombi_01(fromGateway_frame);
+
+    //         }
+
+    //         else if(fromGateway_frame.id == 0x3BE) { // Motor_14
+
+    //           Motor_14_t mo = parse_Motor_14(fromGateway_frame);
+
+
+    //         }
+
+    //         else if(fromGateway_frame.id == 0xAD) { // Kombi 
+
+    //             Getriebe_11_t g11 = parse_Getriebe_11(fromGateway_frame);
+
+
+    //         }
+
+    //         else if(fromGateway_frame.id == 0x31B) { // ESP_24
+
+    //         //     ESP_24_t esp24 = parse_ESP_24(fromGateway_frame);
+
+
+    //         }
 
 
 
 
 
 
-#pragma endregion
 
 
-  }
+
+    // #pragma endregion
+
+
+    //   }
+
+
+
+      
+    // }
+
+    //   // Poll TFTCAN3 (PT_CAN Sniffing)//
+    // void loop_TFTCAN3_poll_MITM_ABS() {
+    //   CAN_message_t PT_CAN_frame;
+    //   CAN_message_t PT_CAN_frame_mod;
+
+    //     // Simple PT_CAN Sniffing for now
+    //     while (TFTCAN3.read(PT_CAN_frame)) {
+    
+    // // Serial.println("tftcan3 recieved");
+
+    //           if (PT_CAN_frame.id == 0x40) { // Airbag Module - Used for Ign On status
+    //           // printFrame(fromGateway_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
+    // // Serial.println("tftcan3 recieved");
+
+    //                 PT_CAN_msg0x40_buf0_Raw = PT_CAN_frame.buf[0];
+    //                 PT_CAN_msg0x40_buf1_Raw = PT_CAN_frame.buf[1];
+    //                 PT_CAN_msg0x40_buf2_Raw = PT_CAN_frame.buf[2];
+    //                 PT_CAN_msg0x40_buf3_Raw = PT_CAN_frame.buf[3];
+    //                 PT_CAN_msg0x40_buf4_Raw = PT_CAN_frame.buf[4];
+    //                 PT_CAN_msg0x40_buf5_Raw = PT_CAN_frame.buf[5];
+    //                 PT_CAN_msg0x40_buf6_Raw = PT_CAN_frame.buf[6];
+    //                 PT_CAN_msg0x40_buf7_Raw = PT_CAN_frame.buf[7];  
+
+    //                 PT_CAN_msg0x40_buf0 = PT_CAN_msg0x40_buf0_Raw;
+    //                 PT_CAN_msg0x40_buf1 = PT_CAN_msg0x40_buf1_Raw;
+    //                 PT_CAN_msg0x40_buf2 = PT_CAN_msg0x40_buf2_Raw;
+    //                 PT_CAN_msg0x40_buf3 = PT_CAN_msg0x40_buf3_Raw;
+    //                 PT_CAN_msg0x40_buf4 = PT_CAN_msg0x40_buf4_Raw;
+    //                 PT_CAN_msg0x40_buf5 = PT_CAN_msg0x40_buf5_Raw;
+    //                 PT_CAN_msg0x40_buf6 = PT_CAN_msg0x40_buf6_Raw;
+    //                 PT_CAN_msg0x40_buf7 = PT_CAN_msg0x40_buf7_Raw;  
+
+
+
+
+    //               // IgnitionStatusTimerCAN(PT_CAN_frame.buf[1]);
+    //               IgnitionStatusTimerCAN = (PT_CAN_msg0x40_buf1_Raw);
+    //               IgnitionStatusTimer = IgnitionStatusTimerCAN;
+
+    //               IgnitionStatusTimer_TimeSinceLastMessage = 0;
+
+    //               digitalToggle(LED_PIN_CANRecieve);
+
+
+
+
+
+    //               }
+
+    //           if (PT_CAN_frame.id == 0x120) { // Cruise stalk static position
+    //           // printFrame(fromGateway_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
+    // // Serial.println("tftcan3 recieved");
+
+    //                 PT_CAN_msg0x120_buf0_Raw = PT_CAN_frame.buf[0];
+    //                 PT_CAN_msg0x120_buf1_Raw = PT_CAN_frame.buf[1];
+    //                 PT_CAN_msg0x120_buf2_Raw = PT_CAN_frame.buf[2];
+    //                 PT_CAN_msg0x120_buf3_Raw = PT_CAN_frame.buf[3];
+    //                 PT_CAN_msg0x120_buf4_Raw = PT_CAN_frame.buf[4];
+    //                 PT_CAN_msg0x120_buf5_Raw = PT_CAN_frame.buf[5];
+    //                 PT_CAN_msg0x120_buf6_Raw = PT_CAN_frame.buf[6];
+    //                 PT_CAN_msg0x120_buf7_Raw = PT_CAN_frame.buf[7];  
+
+    //                 PT_CAN_msg0x120_buf0 = PT_CAN_msg0x120_buf0_Raw;
+    //                 PT_CAN_msg0x120_buf1 = PT_CAN_msg0x120_buf1_Raw;
+    //                 PT_CAN_msg0x120_buf2 = PT_CAN_msg0x120_buf2_Raw;
+    //                 PT_CAN_msg0x120_buf3 = PT_CAN_msg0x120_buf3_Raw;
+    //                 PT_CAN_msg0x120_buf4 = PT_CAN_msg0x120_buf4_Raw;
+    //                 PT_CAN_msg0x120_buf5 = PT_CAN_msg0x120_buf5_Raw;
+    //                 PT_CAN_msg0x120_buf6 = PT_CAN_msg0x120_buf6_Raw;
+    //                 PT_CAN_msg0x120_buf7 = PT_CAN_msg0x120_buf7_Raw;  
+
+
+    //                 cruiseStalkStaticPosition_0x120_PTCAN_CAN = PT_CAN_msg0x120_buf3;
+    //                 cruiseStalkStaticPosition_0x120_PT_CAN = cruiseStalkStaticPosition_0x120_PTCAN_CAN;
+
+    //                 if(cruiseStalkStaticPosition_0x120_PT_CAN == 0 ) { // 0x06/ Dec 6 = cruise Stalk in Static ON position, no button pressed
+    //                     CruiseStalk_ON_FromPT_CAN = 0;
+    //                     CruiseStalk_OFF_FromPT_CAN = 1;
+
+    //                     // LC_BumpIn_ActivationButton = 1;
+
+    //                     }
+
+    //                 else{ //  = cruise Stalk in Static ON position, no button pressed
+    //                     CruiseStalk_ON_FromPT_CAN = 1;
+    //                     CruiseStalk_OFF_FromPT_CAN = 0;
+
+    //                     // LC_BumpIn_ActivationButton = 0;
+
+    //                     }
+
+
+
+
+
+    //               }
+
+    //           if (PT_CAN_frame.id == 0x12B) { // 0x12B - Cruise Stalk Movement
+
+
+    //           //  Serial.print("MB "); Serial.print(PT_CAN_frame.mb);
+    //           //  Serial.print(" ID: "); Serial.print(PT_CAN_frame.id, HEX);
+    //           //  Serial.print(" Buffer: ");
+
+    //           for (uint8_t i = 0; i < PT_CAN_frame.len; i++)
+    //           {
+    //                   //  Serial.print(PT_CAN_frame.buf[i], HEX); Serial.print(" ");
+    //                         // digitalToggle(LED_PIN_CANRecieve);
+
+    //           }
+    //             //  Serial.println("  ");
+
+    //           cruiseStalk_byte1CAN = (PT_CAN_frame.buf[1]);
+    //           cruiseStalk_byte1 = cruiseStalk_byte1CAN;
+
+    //           cruiseStalkCAN = (PT_CAN_frame.buf[2]);
+    //           cruiseStalk = cruiseStalkCAN;
+
+
+
+
+
+    //       #pragma region      // Process 0x12b byte 2 - Cruise Stalk Movement Position
+
+    //         if(cruiseStalk == 128) { // 0x40 or 0x80 =cruise Stalk in Default ON position, no button pressed
+    //             CruiseStalk_ON = 1;
+    //             CruiseStalk_SET = 0;
+    //             CruiseStalk_DOWN = 0;
+    //             CruiseStalk_UP = 0;
+    //             CruiseStalk_RES = 0;
+    //             CruiseStalk_DistanceUP = 0;
+    //             CruiseStalk_DistanceDOWN = 0;
+    //             }
+
+    //             CruiseStalk_ON_bit = bitRead(cruiseStalk_byte1,4 );
+
+
+    //         // if(cruiseStalk == 129 || cruiseStalk == 65) { // 0x41 or 0x81 =cruise SET button pressed
+    //         //     CruiseStalk_SET = 1;
+    //         //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+    //         //     }
+    //         //   else {
+    //         //     CruiseStalk_SET = 0;
+    //         //       }
+    //             CruiseStalk_SET_bit = bitRead(cruiseStalk, 0);
+
+
+    //         // if(cruiseStalk == 130 || cruiseStalk == 66) { // 0x42 or 0x82 =cruise stalk moved UP/towards ceiling
+    //         //     CruiseStalk_UP = 1;
+    //         //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+    //         //       }
+    //         //   else {
+    //         //     CruiseStalk_UP = 0;
+    //         //       }
+    //             CruiseStalk_UP_bit = bitRead(cruiseStalk, 1);
+
+
+    //         // if(cruiseStalk == 132) { // 0x44 or 0x84 =cruise stalk moved DOWN/towards floor
+    //         //     CruiseStalk_DOWN = 1;
+    //         //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+    //         //     }
+    //         //   else {
+    //         //     CruiseStalk_DOWN = 0;
+    //         //       }
+    //             CruiseStalk_DOWN_bit = bitRead(cruiseStalk, 2);
+
+
+    //         // if(cruiseStalk == 136) { // 0x48 or 0x88 =cruise stalk moved Backwards/towards Driver
+    //         //     CruiseStalk_RES = 1;
+    //         //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+    //         //     }
+    //         //   else {
+    //         //     CruiseStalk_RES = 0;
+    //         //       }
+    //             CruiseStalk_RES_bit = bitRead(cruiseStalk, 3);
+
+
+    //         // if(cruiseStalk == 144) { // 0x4 or 0xA0 =cruise stalk up/down distance switch moved DOWN/towards floor
+    //         //     CruiseStalk_DistanceDOWN = 1;
+    //         //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+    //         //     }
+    //         //   else {
+    //         //     CruiseStalk_DistanceDOWN = 0;
+    //         //       }
+    //             CruiseStalk_DistanceDOWN_bit = bitRead(cruiseStalk, 4);
+
+
+    //         // if(cruiseStalk == 160) { // 0x4 or 0xA0 =cruise stalk up/down distance switch moved UP/towards ceiling
+    //         //     CruiseStalk_DistanceUP = 1;
+    //         //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+    //         //     }
+    //         //   else {
+    //         //     CruiseStalk_DistanceUP = 0;
+    //         //       }
+    //             CruiseStalk_DistanceUP_bit = bitRead(cruiseStalk, 5);
+
+
+    //         // if(cruiseStalk_byte1 > 40) { // 0xx or 0xx =cruise stalk moved Forward/towards Engine
+    //         //     CruiseStalk_FORWARD = 1;
+    //         //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+    //         //     }
+    //         //   else {
+    //         //     CruiseStalk_FORWARD = 0;
+    //         //       }
+    //             CruiseStalk_FORWARD_bit = bitRead(cruiseStalk_byte1, 5);
+
+
+
+    //       #pragma endregion
+
+
+
+    //           }
+
+    //           if (PT_CAN_frame.id == 0x391){ // Torque Demand/TPS/Accel Pedal 
+
+    //     //  Serial.print("MB "); Serial.print(PT_CAN_msg0x391.mb);
+    //     //  Serial.print(" ID: "); Serial.print(PT_CAN_msg0x391.id, HEX);
+    //     //  Serial.print(" Buffer: ");
+    //     for (uint8_t i = 0; i < PT_CAN_frame.len; i++)
+    //     {
+    //         //  Serial.print(PT_CAN_msg0x391.buf[i], HEX); Serial.print(" ");
+    //     }
+    //           // Serial.println("  ");
+
+
+
+
+
+    //                 PT_CAN_msg0x391_buf0_Raw = PT_CAN_frame.buf[0];
+    //                 PT_CAN_msg0x391_buf1_Raw = PT_CAN_frame.buf[1];
+    //                 PT_CAN_msg0x391_buf2_Raw = PT_CAN_frame.buf[2];
+    //                 PT_CAN_msg0x391_buf3_Raw = PT_CAN_frame.buf[3];
+    //                 PT_CAN_msg0x391_buf4_Raw = PT_CAN_frame.buf[4];
+    //                 PT_CAN_msg0x391_buf5_Raw = PT_CAN_frame.buf[5];
+    //                 PT_CAN_msg0x391_buf6_Raw = PT_CAN_frame.buf[6];
+    //                 PT_CAN_msg0x391_buf7_Raw = PT_CAN_frame.buf[7];  
+
+    //                 PT_CAN_msg0x391_buf0 = PT_CAN_msg0x391_buf0_Raw;
+    //                 PT_CAN_msg0x391_buf1 = PT_CAN_msg0x391_buf1_Raw;
+    //                 PT_CAN_msg0x391_buf2 = PT_CAN_msg0x391_buf2_Raw;
+    //                 PT_CAN_msg0x391_buf3 = PT_CAN_msg0x391_buf3_Raw;
+    //                 PT_CAN_msg0x391_buf4 = PT_CAN_msg0x391_buf4_Raw;
+    //                 PT_CAN_msg0x391_buf5 = PT_CAN_msg0x391_buf5_Raw;
+    //                 PT_CAN_msg0x391_buf6 = PT_CAN_msg0x391_buf6_Raw;
+    //                 PT_CAN_msg0x391_buf7 = PT_CAN_msg0x391_buf7_Raw;  
+
+
+
+    //               ThrottleTPS_0x391_PTCAN_CAN = PT_CAN_msg0x391_buf2;
+    //               ThrottleTPS_0x391_PT_CAN_Float = (ThrottleTPS_0x391_PTCAN_CAN * 0.39215686275 ) ;
+
+    //               ThrottleTPS_0x391_PT_CAN_Mapped_Float = map(ThrottleTPS_0x391_PT_CAN_Float,10,85,0,100);
+    //               ThrottleTPS_0x391_PT_CAN_Mapped_Int = ThrottleTPS_0x391_PT_CAN_Mapped_Float;
+    //               ThrottleTPS_0x391_PT_CAN_Mapped_Int = constrain(ThrottleTPS_0x391_PT_CAN_Mapped_Int,0,100);
+    //               ThrottleTPS_0x391_PT_CAN_Mapped_Int = ThrottleTPS_0x391_PT_CAN_Mapped_Int;
+
+
+    //               AccelPedal_0x391_PT_CAN = PT_CAN_msg0x391_buf5;
+    //               AccelPedal_0x391_PT_CAN_Float = (AccelPedal_0x391_PT_CAN * 0.39215686275 ) ;
+
+    //               AccelPedal_0x391_PT_CAN_Mapped_Float = map(AccelPedal_0x391_PT_CAN_Float,15,80,0,100);
+    //               AccelPedal_0x391_PT_CAN_Mapped_Int = AccelPedal_0x391_PT_CAN_Mapped_Float;
+    //               AccelPedal_0x391_PT_CAN_Mapped_Int = constrain(AccelPedal_0x391_PT_CAN_Mapped_Int,0,100);
+
+    //             // Serial.print("ThrottleTPS_0x391_PT_CAN_Float: ");
+    //             // Serial.print(ThrottleTPS_0x391_PT_CAN_Float); Serial.print(" ");
+    //             // Serial.print("AccelPedal_0x391_PT_CAN_Mapped_Float: ");
+    //             // Serial.println(AccelPedal_0x391_PT_CAN_Mapped_Float);  Serial.print(" ");
+    //             // Serial.println();
+
+    //             // Serial.println();
+                    
+    //             }
+
+    //           if (PT_CAN_frame.id == 0x3DD){ // paddles
+    // // Serial.println("tftcan3 recieved");
+
+
+    //                 PT_CAN_msg0x3DD_buf0_Raw = PT_CAN_frame.buf[0];
+    //                 PT_CAN_msg0x3DD_buf1_Raw = PT_CAN_frame.buf[1];
+    //                 PT_CAN_msg0x3DD_buf2_Raw = PT_CAN_frame.buf[2];
+    //                 PT_CAN_msg0x3DD_buf3_Raw = PT_CAN_frame.buf[3];
+    //                 PT_CAN_msg0x3DD_buf4_Raw = PT_CAN_frame.buf[4];
+    //                 PT_CAN_msg0x3DD_buf5_Raw = PT_CAN_frame.buf[5];
+    //                 PT_CAN_msg0x3DD_buf6_Raw = PT_CAN_frame.buf[6];
+    //                 PT_CAN_msg0x3DD_buf7_Raw = PT_CAN_frame.buf[7];
+
+    //                 PT_CAN_msg0x3DD_buf0 = PT_CAN_msg0x3DD_buf0_Raw;
+    //                 PT_CAN_msg0x3DD_buf1 = PT_CAN_msg0x3DD_buf1_Raw;
+    //                 PT_CAN_msg0x3DD_buf2 = PT_CAN_msg0x3DD_buf2_Raw;
+    //                 PT_CAN_msg0x3DD_buf3 = PT_CAN_msg0x3DD_buf3_Raw;
+    //                 PT_CAN_msg0x3DD_buf4 = PT_CAN_msg0x3DD_buf4_Raw;
+    //                 PT_CAN_msg0x3DD_buf5 = PT_CAN_msg0x3DD_buf5_Raw;
+    //                 PT_CAN_msg0x3DD_buf6 = PT_CAN_msg0x3DD_buf6_Raw;
+    //                 PT_CAN_msg0x3DD_buf7 = PT_CAN_msg0x3DD_buf7_Raw;
+
+    //                 word PaddlePositionsCAN = PT_CAN_msg0x3DD_buf7;
+    //                 PaddlePositions = PaddlePositionsCAN;
+
+
+    //       if(PaddlePositions == 0x00)
+    //         {
+    //         Paddle_DOWN_Pulled = 0;
+    //         Paddle_UP_Pulled = 0;
+    //         BOTH_Paddles_Pulled = 0;
+    //         }
+
+    //       if(PaddlePositions == 0x01)
+    //         {
+    //         Paddle_DOWN_Pulled = 1;
+    //         Paddle_UP_Pulled = 0;
+    //         BOTH_Paddles_Pulled = 0;
+    //         }
+
+    //       if(PaddlePositions == 0x02)
+    //         {
+            
+    //         Paddle_DOWN_Pulled = 0;
+    //         Paddle_UP_Pulled = 1;
+    //         BOTH_Paddles_Pulled = 0;
+    //         }
+
+    //       if(PaddlePositions == 0x03)
+    //         {
+    //         Paddle_DOWN_Pulled = 0;
+    //         Paddle_UP_Pulled = 0;
+    //         BOTH_Paddles_Pulled = 1;
+    //         }
+
+                                      
+    //             }
+
+              
+
+    //       // // Send Operational Statuses periodically, for TFT Module and ECU to recognize MITM Statuses
+
+    //       // if(LC_BumpIn_AcceptableConditions == 1) {
+
+
+    //       //         CAN_message_t PT_CAN_msg0x795;
+    //       //         PT_CAN_msg0x795.len = 8;
+    //       //         PT_CAN_msg0x795.id = 0x795;
+    //       //         PT_CAN_msg0x795.buf[0] = lowByte(LC_BumpIn_AcceptableConditions);
+    //       //         PT_CAN_msg0x795.buf[1] = 00;
+    //       //         PT_CAN_msg0x795.buf[2] = lowByte(TFT_MITM_LC_BumpIn_Status_Active_canTx);
+    //       //         PT_CAN_msg0x795.buf[3] = 00;
+    //       //         PT_CAN_msg0x795.buf[4] = lowByte(TFT_MITM_LC_BumpInActive_RollingStatus_canTx);
+    //       //         PT_CAN_msg0x795.buf[5] = 00;
+    //       //         PT_CAN_msg0x795.buf[6] = lowByte(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);
+    //       //         PT_CAN_msg0x795.buf[7] = highByte(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);
+
+
+
+
+    //       //     if (PT_CAN_canTxInterval_0x795 > 200) { // this is in millis
+    //       //           TFTCAN3.write(PT_CAN_msg0x795); //  CAN Frame for Yaw, Pitch, Roll
+    //       //           PT_CAN_canTxInterval_0x795 = 0;
+    //       //         }
+
+
+
+      
+      
+    //       //       }
+
+
+
+    //   }
+
+
+      
+    // }
+
+
+    // void do_TFT_MITM_LC_BumpIn_Statuses() {
+
+
+
+    //         if(WhlSpdRR_fromABS_Int < 5) { // Initial Determination of "Acceptable Conditions" for LC BumpIn Activation
+
+    //               LC_BumpIn_AcceptableConditions = 1;
+    //               TFT_MITM_LC_BumpIn_Status_Armed_Int = 1;
+    //           }
+
+    //           else {
+    //                 LC_BumpIn_AcceptableConditions = 0;
+    //                 TFT_MITM_LC_BumpIn_Status_Armed_Int = 0;
+    //             }
+
+
+    //       // Determine Launch Control Bump-in Activation BUTTON
+    //           if(( CruiseStalk_OFF_FromPT_CAN == 1 || Paddle_DOWN_Pulled == 1 ) && LC_BumpIn_AcceptableConditions == 1 ) { // 
+
+    //               LC_BumpIn_ActivationButton = 1;
+
+    //               }
+
+    //             else{ // 
+
+    //                     LC_BumpIn_ActivationButton = 0;
+    //                     TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit = 0;
+
+    //                     }
+
+
+    //       // If Launch Control Bump-In Status is Active, then Update canTx variables
+    //       if(LC_BumpIn_ActivationStatus == 1) {
+    //           TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit = LC_BumpIn_TimeSinceActivation;
+    //           TFT_MITM_LC_BumpIn_Status_Active_Int = 1;
+    //           }
+
+    //         else{
+    //             TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit = 0;
+    //             TFT_MITM_LC_BumpIn_Status_Active_Int = 0;
+    //             }
+
+
+    //       // Determine Rolling Status if LC Bump-In Status is active and the ABS module is showing true wheel speed > 0
+    //       if(LC_BumpIn_ActivationStatus == 1 && WhlSpdRR_fromABS_Float_Raw > 0.5 ) {
+    //           TFT_MITM_LC_BumpInActive_RollingStatus_Int = 1;
+    //           // TrueWhlSpdRR_fromABS_canTx_16bit = WhlSpdRR_fromABS_Float_Raw * 10;
+    //       }  
+    //       else {
+    //           TFT_MITM_LC_BumpInActive_RollingStatus_Int = 0;
+    //       }
+
+
+    //       // Send Operational Statuses periodically, for TFT Module and ECU to recognize MITM Statuses
+
+    //       // if(LC_BumpIn_AcceptableConditions == 0) {
+    //       if(LC_BumpIn_AcceptableConditions < 5) {
+
+    //             TFT_MITM_LC_BumpIn_Status_Combined_Int = ((LC_BumpIn_AcceptableConditions * 1) + (TFT_MITM_LC_BumpIn_Status_Active_Int * 1) + (TFT_MITM_LC_BumpInActive_RollingStatus_Int * 2));
+
+    //               CAN_message_t PT_CAN_msg0x795;
+    //               PT_CAN_msg0x795.len = 8;
+    //               PT_CAN_msg0x795.id = 0x795;
+    //               PT_CAN_msg0x795.buf[0] = 0x3;
+    //               PT_CAN_msg0x795.buf[1] =  lowByte(TFT_MITM_LC_BumpIn_Status_Combined_Int);
+    //               PT_CAN_msg0x795.buf[2] =  lowByte(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);
+    //               PT_CAN_msg0x795.buf[3] = highByte(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);
+    //               PT_CAN_msg0x795.buf[4] =  lowByte(TFT_MITM_LC_BumpIn_TrueWhlSpdRR_fromABS_canTx_16bit);
+    //               PT_CAN_msg0x795.buf[5] = highByte(TFT_MITM_LC_BumpIn_TrueWhlSpdRR_fromABS_canTx_16bit);
+    //               PT_CAN_msg0x795.buf[6] =  lowByte(TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_canTx_16bit);
+    //               PT_CAN_msg0x795.buf[7] = highByte(TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_canTx_16bit);
+
+
+
+
+    //           if (PT_CAN_canTxInterval_0x795 > 30) { // this is in millis
+    //                 TFTCAN3.write(PT_CAN_msg0x795); //  CAN Frame for Yaw, Pitch, Roll
+    //                 PT_CAN_canTxInterval_0x795 = 0;
+    //               }
+
+      
+      
+    //         }
+
+
+    // }
+
+
+    // void loop_SerialPrinting_MITM_ABS(){
+
+
+    //     if(loopDelaySerialPrint > 100) {
+    //                   //  Serial.println("");
+
+    //             Serial.print("lsbInternalCPUTemp: ");  Serial.print(lsbInternalCPUTemp);  Serial.print("\t ");
+
+    //             // Serial.print("ThrottleTPS_0x391_FromGateway_Mapped_Float: ");  Serial.print(ThrottleTPS_0x391_FromGateway_Mapped_Float);  Serial.print("\t ");
+    //             // Serial.print("ThrottleTPS_0x391_FromGatewayCAN: ");  Serial.print(ThrottleTPS_0x391_FromGatewayCAN);  Serial.print("\t ");
+    //             // Serial.print("AccelPedal_0x391_FromGateway_CAN: ");  Serial.print(AccelPedal_0x391_FromGateway_CAN);  Serial.print("\t ");
+    //             // Serial.print("AccelPedal_0x391_FromGateway_Mapped: ");  Serial.print(AccelPedal_0x391_FromGateway_Mapped);  Serial.print("\t ");
+    //             // Serial.print("AccelPedal_0x391_FromGateway_MapF: ");  Serial.print(AccelPedal_0x391_FromGateway_Mapped_Float);  Serial.print("\t ");
+    //             // Serial.print("BrakePedalSwitchStatus: ");  Serial.print(BrakePedalSwitchStatus);  Serial.print("\t ");
+    //             // Serial.print("BrakeSwitch_0x1AB_CAN: ");  Serial.print(BrakeSwitch_0x1AB_CAN);  Serial.print("\t");
+    //             // Serial.print("ParkBrakeStatus_0x104_FromGateway: ");  Serial.print(ParkBrakeStatus_0x104_FromGateway);  Serial.print("\t");
+    //             // Serial.print("CruiseStalk_ON_FromGateway: ");  Serial.print(CruiseStalk_ON_FromGateway);  Serial.print("\t");
+    //             // Serial.print("CruiseStalk_OFF_FromGateway: ");  Serial.print(CruiseStalk_OFF_FromGateway);  Serial.print("\t");
+    //             // Serial.print("BrakePedalSwitchStatus_FromGateway: ");  Serial.print(BrakePedalSwitchStatus_FromGateway);  Serial.print("\t"); //Good
+    //             // Serial.print("BrakePressureBAR_FromGateway_Float: ");  Serial.print(BrakePressureBAR_FromGateway_Float);  Serial.print("\t"); // Good
+    //             // Serial.print("ThrottleTPS_0x391_FromABS_Mapped_Float: ");  Serial.print(ThrottleTPS_0x391_FromABS_Mapped_Float);  Serial.print("\t");
+    //             // Serial.print("ThrottleTPS_0x391_FromABSCAN: ");  Serial.print(ThrottleTPS_0x391_FromABSCAN);  Serial.print("\t");
+    //             // Serial.print("AccelPedal_0x391_FromABS_CAN: ");  Serial.print(AccelPedal_0x391_FromABS_CAN);  Serial.print("\t");
+    //             // Serial.print("AccelPedal_0x391_FromABS_Mapped: ");  Serial.print(AccelPedal_0x391_FromABS_Mapped);  Serial.print("\t");
+    //             // Serial.print("AccelPedal_0x391_FromABS_Mapped_Float: ");  Serial.print(AccelPedal_0x391_FromABS_Mapped_Float);  Serial.print("\t");
+    //             // Serial.print("BrakePedalSwitchStatus: ");  Serial.print(BrakePedalSwitchStatus);  Serial.print("\t");
+    //             // Serial.print("BrakeSwitch_0x1AB_FromABS: ");  Serial.print(BrakeSwitch_0x1AB_FromABS);  Serial.print("\t");
+    //             // Serial.print("ParkBrakeStatus_0x104_FromABS: ");  Serial.print(ParkBrakeStatus_0x104_FromABS);  Serial.print("\t");
+    //             // Serial.print("CruiseStalk_ON_FromABS: ");  Serial.print(CruiseStalk_ON_FromABS);  Serial.print("\t");
+    //             // Serial.print("CruiseStalk_OFF_FromABS: ");  Serial.print(CruiseStalk_OFF_FromABS);  Serial.print("\t");
+    //             // Serial.print("BrakePedalSwitchStatus_FromABS: ");  Serial.print(BrakePedalSwitchStatus_FromABS);  Serial.print("\t"); //Good
+    //           //  Serial.print("LC_BumpIn_ActvButt: ");  Serial.print(LC_BumpIn_ActivationButton);  Serial.print("\t ");
+    //             Serial.print("LC_BumpIn_ActvStat: ");  Serial.print(LC_BumpIn_ActivationStatus);  Serial.print("\t ");
+    //             // Serial.print("CCStalk_0x120_FromGateway: ");  Serial.print(cruiseStalkStaticPosition_0x120_FromGateway);  Serial.print("\t ");
+    //             // Serial.print("cruiseStalkStaticPosition_0x120_PT_CAN: ");  Serial.print(cruiseStalkStaticPosition_0x120_PT_CAN);  Serial.print("\t ");
+
+                
+    //             Serial.print("MITM_Status_Combined_Int: ");  Serial.print(TFT_MITM_LC_BumpIn_Status_Combined_Int);  Serial.print("\t ");
+    //             Serial.print("MITM_TimeSinceActiveMS_16bit: ");  Serial.print(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);  Serial.print("\t ");
+    //             Serial.print("MITM_Status_TrueWhlSpdRR_16bit: ");  Serial.print(TFT_MITM_LC_BumpIn_TrueWhlSpdRR_fromABS_canTx_16bit);  Serial.print("\t ");
+    //             Serial.print("MITM_Status_TrueBrkPresMPA_16bit: ");  Serial.print(TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_canTx_16bit);  Serial.print("\t ");
+
+
+
+
+    //             // Serial.print("LC_BumpIn_TimeSinceActivation: ");  Serial.print(LC_BumpIn_TimeSinceActivation);  Serial.print("\t ");
+    //             // Serial.print("BrakePedalSwitchStatus: ");  Serial.print(BrakePedalSwitchStatus);  Serial.print("\t");
+    //             // Serial.print("BrakePressureBAR_atTimeof_LCBumpInActivation_Float: ");  Serial.print(BrakePressureBAR_atTimeof_LCBumpInActivation_Float);  Serial.print("\t");
+    //             // Serial.print("BrakePressureBAR_atTimeobuf2: ");  Serial.print(BrakePressureBAR_atTimeof_LCBumpInActivation_Raw_buf2);  Serial.print("\t");
+    //             // Serial.print("BrakePressureBAR_atTimeobuf3: ");  Serial.print(BrakePressureBAR_atTimeof_LCBumpInActivation_Raw_buf3);  Serial.print("\t");
+    //             // Serial.print("BrakePressureBAR_0x106_Raw: ");  Serial.print(BrakePressureBAR_0x106_Raw);  Serial.print("\t");
+    //             // Serial.print("BrakePressureBAR_Float: ");  Serial.print(BrakePressureBAR_Float);  Serial.print("\t");
+    //             // Serial.print("BrakePressureBAR_Int: ");  Serial.print(BrakePressureBAR_Int);  Serial.print("\t");
+    //             // Serial.print("WhlSpdRL: ");  Serial.print(WhlSpdRL);  Serial.print("\t");
+    //             // Serial.print("WhlSpdRL_Raw_CAN: ");  Serial.print(WhlSpdRL_Raw_CAN);  Serial.print("\t");
+    //             // Serial.print("WhlSpdRR: ");  Serial.print(WhlSpdRR);  Serial.print("\t");
+    //             // Serial.print("WhlSpdRR_fromABS_FltRaw: ");  Serial.print(WhlSpdRR_fromABS_Float_Raw);  Serial.print("\t");
+    //             // Serial.print("WhlSpdRR_Raw_CAN: ");  Serial.print(WhlSpdRR_Raw_CAN);  Serial.print("\t");
+    //             // Serial.print("TrueWhlSpdRRFlt: ");  Serial.print(TrueWhlSpdRR_fromABS_canTx_16bit);  Serial.print("\t");
+
+    //             // Serial.print("WhlSpdFL: ");  Serial.print(WhlSpdFL);  Serial.print("\t");
+    //             // Serial.print("WhlSpdFL_Raw_CAN: ");  Serial.print(WhlSpdFL_Raw_CAN);  Serial.print("\t");
+    //             // Serial.print("WhlSpdFR: ");  Serial.print(WhlSpdFR);  Serial.print("\t");
+    //             // Serial.print("WhlSpdFR_Raw_CAN: ");  Serial.print(WhlSpdFR_Raw_CAN);  Serial.print("\t");
+
+    //             // BrakePedalSwitchStatus_FromABS
+
+    //             // Serial.print("APP_0x391_PT_CAN_MapF: ");  Serial.print(AccelPedal_0x391_PT_CAN_Mapped_Float);  Serial.print("\t ");
+    //             // Serial.print("CruiseStalk_ON_FromPT_CAN: ");  Serial.print(CruiseStalk_ON_FromPT_CAN);  Serial.print("\t ");
+    //             // Serial.print("cruiseStalkStaticPos_0x120PTCAN: ");  Serial.print(cruiseStalkStaticPosition_0x120_PTCAN_CAN);  Serial.print("\t ");
+    //             // Serial.print("CC_OFF_FromPT_CAN: ");  Serial.print(CruiseStalk_OFF_FromPT_CAN);  Serial.print("\t ");
+    //             // Serial.print("Paddle_DOWN_: ");  Serial.print(Paddle_DOWN_Pulled);  Serial.print("\t ");
+    //             // Serial.print("PaddlePositions: ");  Serial.print(PaddlePositions);  Serial.print("\t ");
+
+
+
+    //         #pragma region // DBC Parsed
+
+    //         // ESP - Brakes and Chassis Movement
+    //             // Serial.print("MQB_ESP05_0x106_BrakePressureBAR_Float: ");  Serial.print(MQB_ESP05_0x106_BrakePressureBAR_Float);  Serial.print("\t"); // Good
+    //             Serial.print("MQB_ESP05_0x106_BrkPrsMPA: ");  Serial.print(MQB_ESP05_0x106_BrakePressureMPA_Float);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_Brake_Pressure: ");  Serial.print(MQB_ESP05_0x106_Brake_Pressure);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_Driver_Brakes: ");  Serial.print(MQB_ESP05_0x106_Driver_Brakes);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_Status_Brake_Pressure: ");  Serial.print(MQB_ESP05_0x106_Status_Brake_Pressure);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_QBit_Driver_Brakes: ");  Serial.print(MQB_ESP05_0x106_QBit_Driver_Brakes);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_Status_Brake_Pressure: ");  Serial.print(MQB_ESP05_0x106_Status_Brake_Pressure);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_Threshold_Negative_Pressure: ");  Serial.print(MQB_ESP05_0x106_Threshold_Negative_Pressure);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ECD_0x106_Brake_Light: ");  Serial.print(MQB_ECD_0x106_Brake_Light);  Serial.print("\t"); // not good
+    //             // Serial.print("MQB_ESP05_0x106_Eingr_HL: ");  Serial.print(MQB_ESP05_0x106_Eingr_HL);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_Eingr_HR: ");  Serial.print(MQB_ESP05_0x106_Eingr_HR);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_Eingr_VL: ");  Serial.print(MQB_ESP05_0x106_Eingr_VL);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP05_0x106_Eingr_VR: ");  Serial.print(MQB_ESP05_0x106_Eingr_VR);  Serial.print("\t"); // Good
+                
+
+    //             // Serial.print("MQB_ESP_0x101_Standstill_Flag: ");  Serial.print(MQB_ESP_0x101_Standstill_Flag);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP_0x101_QBit_LongitudinalMovement: ");  Serial.print(MQB_ESP_0x101_QBit_LongitudinalMovement);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP_0x101_QBit_LateralMovement: ");  Serial.print(MQB_ESP_0x101_QBit_LateralMovement);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP_0x101_LongitudinalAcceleration: ");  Serial.print(MQB_ESP_0x101_LongitudinalAcceleration);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP_0x101_LateralAcceleration: ");  Serial.print(MQB_ESP_0x101_LateralAcceleration);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP_0x101_Yaw_Rate: ");  Serial.print(MQB_ESP_0x101_Yaw_Rate);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP_0x101_PLA_Abort: ");  Serial.print(MQB_ESP_0x101_PLA_Abort);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP_0x101_Status_ESP_PLA: ");  Serial.print(MQB_ESP_0x101_Status_ESP_PLA);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP_0x101_QBit_Initial_Value_Wank: ");  Serial.print(MQB_ESP_0x101_QBit_Initial_Value_Wank);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP_0x101_DistributionWankmom: ");  Serial.print(MQB_ESP_0x101_Distribution_Wankmom);  Serial.print(" \t "); // Good
+
+
+    //             // Serial.print("MQB_ESP08_0x11E_Slipping_Stillstand: ");  Serial.print(MQB_ESP08_0x11E_Slipping_Stillstand);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP08_0x11E_StandStillPhase_Exhausted: ");  Serial.print(MQB_ESP08_0x11E_StandStillPhase_Exhausted);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESC_0x11E_Brake_Pressure_Gradient: ");  Serial.print(MQB_ESC_0x11E_Brake_Pressure_Gradient);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP08_0x11E_VehicleSpeed_ref_Direction_Of_Travel: ");  Serial.print(MQB_ESP08_0x11E_VehicleSpeed_ref_Direction_Of_Travel);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP08_0x11E_VehicleSpeed_ref: ");  Serial.print(MQB_ESP08_0x11E_VehicleSpeed_ref);  Serial.print(" \t "); // Good
+
+    //             // Serial.print("MQB_ESP10_0x116_HL_Direction_of_Travel: ");  Serial.print(MQB_ESP10_0x116_HL_Direction_of_Travel);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP10_0x116_HR_Direction_of_Travel: ");  Serial.print(MQB_ESP10_0x116_HR_Direction_of_Travel);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP10_0x116_VL_Direction_of_Travel: ");  Serial.print(MQB_ESP10_0x116_VL_Direction_of_Travel);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP10_0x116_VR_Direction_of_Travel: ");  Serial.print(MQB_ESP10_0x116_VR_Direction_of_Travel);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP10_0x116_Path_Impulse_HL: ");  Serial.print(MQB_ESP10_0x116_Path_Impulse_HL);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP10_0x116_Path_Impulse_HR: ");  Serial.print(MQB_ESP10_0x116_Path_Impulse_HR);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP10_0x116_Path_Impulse_VL: ");  Serial.print(MQB_ESP10_0x116_Path_Impulse_VL);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP10_0x116_Path_Impulse_VR: ");  Serial.print(MQB_ESP10_0x116_Path_Impulse_VR);  Serial.print(" \t "); // Good
+              
+              
+    //             // Serial.print("MQB_GE_0x3C8_amax_Possible: ");  Serial.print(MQB_GE_0x3C8_amax_Possible);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_GE_0x3C8_LaunchControl: ");  Serial.print(MQB_GE_0x3C8_LaunchControl);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_GE_0x3C8_Sumpftemperatur: ");  Serial.print(MQB_GE_0x3C8_Sumpftemperatur);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_GE_0x3C8_TorqueLoss: ");  Serial.print(MQB_GE_0x3C8_TorqueLoss);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_GE_0x3C8_OBD_Status: ");  Serial.print(MQB_GE_0x3C8_OBD_Status);  Serial.print(" \t "); // Good
+
+    //             // Serial.print("MQB_ESP07_0x392_RTA_HL: ");  Serial.print(MQB_ESP07_0x392_RTA_HL);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP07_0x392_RTA_HR: ");  Serial.print(MQB_ESP07_0x392_RTA_HR);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_ESP07_0x392_RTA_VR: ");  Serial.print(MQB_ESP07_0x392_RTA_VR);  Serial.print(" \t "); // Good
+
+    //             // Serial.print("MQB_OBD_0x392_Wheel_Sensor_Error_HL: ");  Serial.print(MQB_OBD_0x392_Wheel_Sensor_Error_HL);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_OBD_0x392_Wheel_Sensor_Error_HR: ");  Serial.print(MQB_OBD_0x392_Wheel_Sensor_Error_HR);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_OBD_0x392_Wheel_Sensor_Error_VL: ");  Serial.print(MQB_OBD_0x392_Wheel_Sensor_Error_VL);  Serial.print(" \t "); // Good
+    //             // Serial.print("MQB_OBD_0x392_Wheel_Sensor_Error_VR: ");  Serial.print(MQB_OBD_0x392_Wheel_Sensor_Error_VR);  Serial.print(" \t "); // Good
+
+
+              
+    //             // Serial.print("MQB_ESC_0xFD_v_Signal_Qualifier_High_Low: ");  Serial.print(MQB_ESC_0xFD_v_Signal_Qualifier_High_Low);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_BR_0xFD_Engagement_Torque: ");  Serial.print(MQB_BR_0xFD_Engagement_Torque);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ABS_0xFD_Braking: ");  Serial.print(MQB_ABS_0xFD_Braking);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ASR_0xFD_Intervention_Switch: ");  Serial.print(MQB_ASR_0xFD_Intervention_Switch);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESC_0xFD_Reku_Release: ");  Serial.print(MQB_ESC_0xFD_Reku_Release);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP21_0xFD_ASP: ");  Serial.print(MQB_ESP21_0xFD_ASP);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP21_0xFD_QBit_v_Signal: ");  Serial.print(MQB_ESP21_0xFD_QBit_v_Signal);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP21_0xFD_VehicleSpeed_Signal: ");  Serial.print(MQB_ESP21_0xFD_VehicleSpeed_Signal);  Serial.print("\t"); // Good
+                
+                
+    //             // Serial.print("MQB_ESP_0xB2_HL_Wheel_Speed_02: ");  Serial.print(MQB_ESP_0xB2_HL_Wheel_Speed_02);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP_0xB2_HR_Wheel_Speed_02: ");  Serial.print(MQB_ESP_0xB2_HR_Wheel_Speed_02);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP_0xB2_VL_Wheel_Speed_02: ");  Serial.print(MQB_ESP_0xB2_VL_Wheel_Speed_02);  Serial.print("\t"); // Good
+    //             // Serial.print("MQB_ESP_0xB2_VR_Wheel_Speed_02: ");  Serial.print(MQB_ESP_0xB2_VR_Wheel_Speed_02);  Serial.print("\t"); // Good
+
+
+
+    //             #pragma endregion
+
+
+    //             Serial.println("");
+
+    //             loopDelaySerialPrint = 0;
+    //         }
+
+
+    //   }
+  
+
+
+
+   #pragma endregion
+ 
+ 
+  #pragma region  // MITM - TCU Node  
+
+
+
+// Poll TFTCAN1(Wired to TCU side of interruption) - direct callback from TFTCAN1 to TFTCAN2 (unmodified TCU data)
+// void loop_TFTCAN1_poll_MITM_TCU() {
+//   CAN_message_t fromTCU_frame;
+//   CAN_message_t fromTCU_frame_mod;
+//   // CAN2 → CAN1
+//   while (TFTCAN1.read(fromTCU_frame)) {
+//     //  printFrame(fromTCU_frame, 2);  // 2 - Printing Raw Messages received on Can2
+//             TFTCAN2.write(fromTCU_frame);
+//             // printFrame(fromTCU_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+//     }
+//   }
+
+
+
+
+  // Poll TFTCAN2 - (Wired to PT_CAN on TCU side of interruption) - Pass all TFTCAN2 frames unmodified through to TFTCAN3
+void loop_TFTCAN2_poll_MITM_TCU() {
+  CAN_message_t fromTCU_frame;
+  CAN_message_t fromTCU_frame_mod;
+
+  // CAN2 → CAN3
+    // Sniffing of PT_CAN frames originating from TCU
+    while (TFTCAN2.read(fromTCU_frame)) {
+      // Serial.println("TFTCAN2 recieved");
+      // printFrame(fromTCU_frame, 4); 
+
+      TFTCAN3.write(fromTCU_frame); // write unmodified TCU frames to TFTCAN3, which is wired to ECU side of interruption
+      // printFrame(fromTCU_frame, 4); 
+      }
 
 
 
   
 }
 
+  // Poll TFTCAN3 - (Wired to PT_CAN on ECU side of interruption) - Intercept PT_CAN Frames going from ECU to TCU, and modify some frames when EngineTqModification status is active.  
+void loop_TFTCAN3_poll_MITM_TCU() {
+  CAN_message_t fromECU_frame;
 
-  // Poll TFTCAN3 (PT_CAN Sniffing)//
-void loop_TFTCAN3_poll_MITM_ABS() {
-  CAN_message_t PT_CAN_frame;
-  CAN_message_t PT_CAN_frame_mod;
+    // Intercept ECU→TCU frames; modify handled IDs, auto-forward everything else
+    while (TFTCAN3.read(fromECU_frame)) {
 
-    // Simple PT_CAN Sniffing for now
-    while (TFTCAN3.read(PT_CAN_frame)) {
- 
+        // ---- FAST-PATH: forward unhandled IDs immediately and skip all processing ----
+        if (!tcu_mitm_is_handled(fromECU_frame.id)) {
+            TFTCAN2.write(fromECU_frame);
+            continue;
+        }
+        // Only IDs in TCU_MITM_Handled_IDs[] reach the code below
+        // ---------------------------------------------------------------------------------
+
 // Serial.println("tftcan3 recieved");
 
-          if (PT_CAN_frame.id == 0x40) { // Airbag Module - Used for Ign On status
-          // printFrame(fromGateway_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
-// Serial.println("tftcan3 recieved");
+        if (fromECU_frame.id == 0x40) { // Airbag Module - Used for Ign On status
+          // printFrame(fromECU_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
+          // Serial.println("tftcan3 recieved");
 
-                PT_CAN_msg0x40_buf0_Raw = PT_CAN_frame.buf[0];
-                PT_CAN_msg0x40_buf1_Raw = PT_CAN_frame.buf[1];
-                PT_CAN_msg0x40_buf2_Raw = PT_CAN_frame.buf[2];
-                PT_CAN_msg0x40_buf3_Raw = PT_CAN_frame.buf[3];
-                PT_CAN_msg0x40_buf4_Raw = PT_CAN_frame.buf[4];
-                PT_CAN_msg0x40_buf5_Raw = PT_CAN_frame.buf[5];
-                PT_CAN_msg0x40_buf6_Raw = PT_CAN_frame.buf[6];
-                PT_CAN_msg0x40_buf7_Raw = PT_CAN_frame.buf[7];  
+              PT_CAN_msg0x40_buf0_Raw = fromECU_frame.buf[0];
+              PT_CAN_msg0x40_buf1_Raw = fromECU_frame.buf[1];
+              PT_CAN_msg0x40_buf2_Raw = fromECU_frame.buf[2];
+              PT_CAN_msg0x40_buf3_Raw = fromECU_frame.buf[3];
+              PT_CAN_msg0x40_buf4_Raw = fromECU_frame.buf[4];
+              PT_CAN_msg0x40_buf5_Raw = fromECU_frame.buf[5];
+              PT_CAN_msg0x40_buf6_Raw = fromECU_frame.buf[6];
+              PT_CAN_msg0x40_buf7_Raw = fromECU_frame.buf[7];  
 
-                PT_CAN_msg0x40_buf0 = PT_CAN_msg0x40_buf0_Raw;
-                PT_CAN_msg0x40_buf1 = PT_CAN_msg0x40_buf1_Raw;
-                PT_CAN_msg0x40_buf2 = PT_CAN_msg0x40_buf2_Raw;
-                PT_CAN_msg0x40_buf3 = PT_CAN_msg0x40_buf3_Raw;
-                PT_CAN_msg0x40_buf4 = PT_CAN_msg0x40_buf4_Raw;
-                PT_CAN_msg0x40_buf5 = PT_CAN_msg0x40_buf5_Raw;
-                PT_CAN_msg0x40_buf6 = PT_CAN_msg0x40_buf6_Raw;
-                PT_CAN_msg0x40_buf7 = PT_CAN_msg0x40_buf7_Raw;  
-
-
+              PT_CAN_msg0x40_FromECU_buf0 = PT_CAN_msg0x40_buf0_Raw;
+              PT_CAN_msg0x40_FromECU_buf1 = PT_CAN_msg0x40_buf1_Raw;
+              PT_CAN_msg0x40_FromECU_buf2 = PT_CAN_msg0x40_buf2_Raw;
+              PT_CAN_msg0x40_FromECU_buf3 = PT_CAN_msg0x40_buf3_Raw;
+              PT_CAN_msg0x40_FromECU_buf4 = PT_CAN_msg0x40_buf4_Raw;
+              PT_CAN_msg0x40_FromECU_buf5 = PT_CAN_msg0x40_buf5_Raw;
+              PT_CAN_msg0x40_FromECU_buf6 = PT_CAN_msg0x40_buf6_Raw;
+              PT_CAN_msg0x40_FromECU_buf7 = PT_CAN_msg0x40_buf7_Raw;  
 
 
-              // IgnitionStatusTimerCAN(PT_CAN_frame.buf[1]);
+
+
+              // IgnitionStatusTimerCAN(fromECU_frame.buf[1]);
               IgnitionStatusTimerCAN = (PT_CAN_msg0x40_buf1_Raw);
               IgnitionStatusTimer = IgnitionStatusTimerCAN;
 
@@ -2832,677 +3622,51 @@ void loop_TFTCAN3_poll_MITM_ABS() {
 
               }
 
-          if (PT_CAN_frame.id == 0x120) { // Cruise stalk static position
-          // printFrame(fromGateway_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
-// Serial.println("tftcan3 recieved");
+        if (fromECU_frame.id == 0x120) { // Cruise stalk static position
+          // printFrame(fromECU_frame, 3);                                  //uncomment line to print frames received on TFTCAN3
+          // Serial.println("tftcan3 recieved");
 
-                PT_CAN_msg0x120_buf0_Raw = PT_CAN_frame.buf[0];
-                PT_CAN_msg0x120_buf1_Raw = PT_CAN_frame.buf[1];
-                PT_CAN_msg0x120_buf2_Raw = PT_CAN_frame.buf[2];
-                PT_CAN_msg0x120_buf3_Raw = PT_CAN_frame.buf[3];
-                PT_CAN_msg0x120_buf4_Raw = PT_CAN_frame.buf[4];
-                PT_CAN_msg0x120_buf5_Raw = PT_CAN_frame.buf[5];
-                PT_CAN_msg0x120_buf6_Raw = PT_CAN_frame.buf[6];
-                PT_CAN_msg0x120_buf7_Raw = PT_CAN_frame.buf[7];  
+              PT_CAN_msg0x120_buf0_Raw = fromECU_frame.buf[0];
+              PT_CAN_msg0x120_buf1_Raw = fromECU_frame.buf[1];
+              PT_CAN_msg0x120_buf2_Raw = fromECU_frame.buf[2];
+              PT_CAN_msg0x120_buf3_Raw = fromECU_frame.buf[3];
+              PT_CAN_msg0x120_buf4_Raw = fromECU_frame.buf[4];
+              PT_CAN_msg0x120_buf5_Raw = fromECU_frame.buf[5];
+              PT_CAN_msg0x120_buf6_Raw = fromECU_frame.buf[6];
+              PT_CAN_msg0x120_buf7_Raw = fromECU_frame.buf[7];  
 
-                PT_CAN_msg0x120_buf0 = PT_CAN_msg0x120_buf0_Raw;
-                PT_CAN_msg0x120_buf1 = PT_CAN_msg0x120_buf1_Raw;
-                PT_CAN_msg0x120_buf2 = PT_CAN_msg0x120_buf2_Raw;
-                PT_CAN_msg0x120_buf3 = PT_CAN_msg0x120_buf3_Raw;
-                PT_CAN_msg0x120_buf4 = PT_CAN_msg0x120_buf4_Raw;
-                PT_CAN_msg0x120_buf5 = PT_CAN_msg0x120_buf5_Raw;
-                PT_CAN_msg0x120_buf6 = PT_CAN_msg0x120_buf6_Raw;
-                PT_CAN_msg0x120_buf7 = PT_CAN_msg0x120_buf7_Raw;  
+              PT_CAN_msg0x120_FromECU_buf0 = PT_CAN_msg0x120_buf0_Raw;
+              PT_CAN_msg0x120_FromECU_buf1 = PT_CAN_msg0x120_buf1_Raw;
+              PT_CAN_msg0x120_FromECU_buf2 = PT_CAN_msg0x120_buf2_Raw;
+              PT_CAN_msg0x120_FromECU_buf3 = PT_CAN_msg0x120_buf3_Raw;
+              PT_CAN_msg0x120_FromECU_buf4 = PT_CAN_msg0x120_buf4_Raw;
+              PT_CAN_msg0x120_FromECU_buf5 = PT_CAN_msg0x120_buf5_Raw;
+              PT_CAN_msg0x120_FromECU_buf6 = PT_CAN_msg0x120_buf6_Raw;
+              PT_CAN_msg0x120_FromECU_buf7 = PT_CAN_msg0x120_buf7_Raw;  
 
 
-                 cruiseStalkStaticPosition_0x120_PTCAN_CAN = PT_CAN_msg0x120_buf3;
-                 cruiseStalkStaticPosition_0x120_PT_CAN = cruiseStalkStaticPosition_0x120_PTCAN_CAN;
+              cruiseStalkStaticPosition_0x120_PTCAN_CAN = PT_CAN_msg0x120_FromECU_buf3;
+              cruiseStalkStaticPosition_0x120_PT_CAN = cruiseStalkStaticPosition_0x120_PTCAN_CAN;
 
-                if(cruiseStalkStaticPosition_0x120_PT_CAN == 0 ) { // 0x06/ Dec 6 = cruise Stalk in Static ON position, no button pressed
-                    CruiseStalk_ON_FromPT_CAN = 0;
-                    CruiseStalk_OFF_FromPT_CAN = 1;
-
-                    // LC_BumpIn_ActivationButton = 1;
-
-                    }
-
+              if(cruiseStalkStaticPosition_0x120_PT_CAN == 0 ) { // 0x06/ Dec 6 = cruise Stalk in Static ON position, no button pressed
+                  CruiseStalk_ON_FromPT_CAN = 0;
+                  CruiseStalk_OFF_FromPT_CAN = 1;
+                  // LC_BumpIn_ActivationButton = 1;
+                  }
                 else{ //  = cruise Stalk in Static ON position, no button pressed
                     CruiseStalk_ON_FromPT_CAN = 1;
                     CruiseStalk_OFF_FromPT_CAN = 0;
-
                     // LC_BumpIn_ActivationButton = 0;
-
                     }
 
-
-
-
-
               }
 
-          if (PT_CAN_frame.id == 0x12B) { // 0x12B - Cruise Stalk Movement
-
-
-          //  Serial.print("MB "); Serial.print(PT_CAN_frame.mb);
-          //  Serial.print(" ID: "); Serial.print(PT_CAN_frame.id, HEX);
-          //  Serial.print(" Buffer: ");
-
-          for (uint8_t i = 0; i < PT_CAN_frame.len; i++)
-          {
-                  //  Serial.print(PT_CAN_frame.buf[i], HEX); Serial.print(" ");
-                        // digitalToggle(LED_PIN_CANRecieve);
-
-          }
-            //  Serial.println("  ");
-
-          cruiseStalk_byte1CAN = (PT_CAN_frame.buf[1]);
-          cruiseStalk_byte1 = cruiseStalk_byte1CAN;
-
-          cruiseStalkCAN = (PT_CAN_frame.buf[2]);
-          cruiseStalk = cruiseStalkCAN;
-
-
-
-
-
-      #pragma region      // Process 0x12b byte 2 - Cruise Stalk Movement Position
-
-        if(cruiseStalk == 128) { // 0x40 or 0x80 =cruise Stalk in Default ON position, no button pressed
-            CruiseStalk_ON = 1;
-            CruiseStalk_SET = 0;
-            CruiseStalk_DOWN = 0;
-            CruiseStalk_UP = 0;
-            CruiseStalk_RES = 0;
-            CruiseStalk_DistanceUP = 0;
-            CruiseStalk_DistanceDOWN = 0;
-            }
-
-            CruiseStalk_ON_bit = bitRead(cruiseStalk_byte1,4 );
-
-
-        // if(cruiseStalk == 129 || cruiseStalk == 65) { // 0x41 or 0x81 =cruise SET button pressed
-        //     CruiseStalk_SET = 1;
-        //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
-        //     }
-        //   else {
-        //     CruiseStalk_SET = 0;
-        //       }
-            CruiseStalk_SET_bit = bitRead(cruiseStalk, 0);
-
-
-        // if(cruiseStalk == 130 || cruiseStalk == 66) { // 0x42 or 0x82 =cruise stalk moved UP/towards ceiling
-        //     CruiseStalk_UP = 1;
-        //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
-        //       }
-        //   else {
-        //     CruiseStalk_UP = 0;
-        //       }
-            CruiseStalk_UP_bit = bitRead(cruiseStalk, 1);
-
-
-        // if(cruiseStalk == 132) { // 0x44 or 0x84 =cruise stalk moved DOWN/towards floor
-        //     CruiseStalk_DOWN = 1;
-        //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
-        //     }
-        //   else {
-        //     CruiseStalk_DOWN = 0;
-        //       }
-            CruiseStalk_DOWN_bit = bitRead(cruiseStalk, 2);
-
-
-        // if(cruiseStalk == 136) { // 0x48 or 0x88 =cruise stalk moved Backwards/towards Driver
-        //     CruiseStalk_RES = 1;
-        //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
-        //     }
-        //   else {
-        //     CruiseStalk_RES = 0;
-        //       }
-            CruiseStalk_RES_bit = bitRead(cruiseStalk, 3);
-
-
-        // if(cruiseStalk == 144) { // 0x4 or 0xA0 =cruise stalk up/down distance switch moved DOWN/towards floor
-        //     CruiseStalk_DistanceDOWN = 1;
-        //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
-        //     }
-        //   else {
-        //     CruiseStalk_DistanceDOWN = 0;
-        //       }
-            CruiseStalk_DistanceDOWN_bit = bitRead(cruiseStalk, 4);
-
-
-        // if(cruiseStalk == 160) { // 0x4 or 0xA0 =cruise stalk up/down distance switch moved UP/towards ceiling
-        //     CruiseStalk_DistanceUP = 1;
-        //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
-        //     }
-        //   else {
-        //     CruiseStalk_DistanceUP = 0;
-        //       }
-            CruiseStalk_DistanceUP_bit = bitRead(cruiseStalk, 5);
-
-
-        // if(cruiseStalk_byte1 > 40) { // 0xx or 0xx =cruise stalk moved Forward/towards Engine
-        //     CruiseStalk_FORWARD = 1;
-        //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
-        //     }
-        //   else {
-        //     CruiseStalk_FORWARD = 0;
-        //       }
-            CruiseStalk_FORWARD_bit = bitRead(cruiseStalk_byte1, 5);
-
-
-
-      #pragma endregion
-
-
-
-          }
-
-          if (PT_CAN_frame.id == 0x391){ // Torque Demand/TPS/Accel Pedal 
-
-    //  Serial.print("MB "); Serial.print(PT_CAN_msg0x391.mb);
-    //  Serial.print(" ID: "); Serial.print(PT_CAN_msg0x391.id, HEX);
-    //  Serial.print(" Buffer: ");
-    for (uint8_t i = 0; i < PT_CAN_frame.len; i++)
-    {
-        //  Serial.print(PT_CAN_msg0x391.buf[i], HEX); Serial.print(" ");
-    }
-          // Serial.println("  ");
-
-
-
-
-
-                PT_CAN_msg0x391_buf0_Raw = PT_CAN_frame.buf[0];
-                PT_CAN_msg0x391_buf1_Raw = PT_CAN_frame.buf[1];
-                PT_CAN_msg0x391_buf2_Raw = PT_CAN_frame.buf[2];
-                PT_CAN_msg0x391_buf3_Raw = PT_CAN_frame.buf[3];
-                PT_CAN_msg0x391_buf4_Raw = PT_CAN_frame.buf[4];
-                PT_CAN_msg0x391_buf5_Raw = PT_CAN_frame.buf[5];
-                PT_CAN_msg0x391_buf6_Raw = PT_CAN_frame.buf[6];
-                PT_CAN_msg0x391_buf7_Raw = PT_CAN_frame.buf[7];  
-
-                PT_CAN_msg0x391_buf0 = PT_CAN_msg0x391_buf0_Raw;
-                PT_CAN_msg0x391_buf1 = PT_CAN_msg0x391_buf1_Raw;
-                PT_CAN_msg0x391_buf2 = PT_CAN_msg0x391_buf2_Raw;
-                PT_CAN_msg0x391_buf3 = PT_CAN_msg0x391_buf3_Raw;
-                PT_CAN_msg0x391_buf4 = PT_CAN_msg0x391_buf4_Raw;
-                PT_CAN_msg0x391_buf5 = PT_CAN_msg0x391_buf5_Raw;
-                PT_CAN_msg0x391_buf6 = PT_CAN_msg0x391_buf6_Raw;
-                PT_CAN_msg0x391_buf7 = PT_CAN_msg0x391_buf7_Raw;  
-
-
-
-              ThrottleTPS_0x391_PTCAN_CAN = PT_CAN_msg0x391_buf2;
-              ThrottleTPS_0x391_PT_CAN_Float = (ThrottleTPS_0x391_PTCAN_CAN * 0.39215686275 ) ;
-
-              ThrottleTPS_0x391_PT_CAN_Mapped_Float = map(ThrottleTPS_0x391_PT_CAN_Float,10,85,0,100);
-              ThrottleTPS_0x391_PT_CAN_Mapped_Int = ThrottleTPS_0x391_PT_CAN_Mapped_Float;
-              ThrottleTPS_0x391_PT_CAN_Mapped_Int = constrain(ThrottleTPS_0x391_PT_CAN_Mapped_Int,0,100);
-              ThrottleTPS_0x391_PT_CAN_Mapped_Int = ThrottleTPS_0x391_PT_CAN_Mapped_Int;
-
-
-              AccelPedal_0x391_PT_CAN = PT_CAN_msg0x391_buf5;
-              AccelPedal_0x391_PT_CAN_Float = (AccelPedal_0x391_PT_CAN * 0.39215686275 ) ;
-
-              AccelPedal_0x391_PT_CAN_Mapped_Float = map(AccelPedal_0x391_PT_CAN_Float,15,80,0,100);
-              AccelPedal_0x391_PT_CAN_Mapped_Int = AccelPedal_0x391_PT_CAN_Mapped_Float;
-              AccelPedal_0x391_PT_CAN_Mapped_Int = constrain(AccelPedal_0x391_PT_CAN_Mapped_Int,0,100);
-
-            // Serial.print("ThrottleTPS_0x391_PT_CAN_Float: ");
-            // Serial.print(ThrottleTPS_0x391_PT_CAN_Float); Serial.print(" ");
-            // Serial.print("AccelPedal_0x391_PT_CAN_Mapped_Float: ");
-            // Serial.println(AccelPedal_0x391_PT_CAN_Mapped_Float);  Serial.print(" ");
-            // Serial.println();
-
-            // Serial.println();
-                
-            }
-
-          if (PT_CAN_frame.id == 0x3DD){ // paddles
-// Serial.println("tftcan3 recieved");
-
-
-                 PT_CAN_msg0x3DD_buf0_Raw = PT_CAN_frame.buf[0];
-                 PT_CAN_msg0x3DD_buf1_Raw = PT_CAN_frame.buf[1];
-                 PT_CAN_msg0x3DD_buf2_Raw = PT_CAN_frame.buf[2];
-                 PT_CAN_msg0x3DD_buf3_Raw = PT_CAN_frame.buf[3];
-                 PT_CAN_msg0x3DD_buf4_Raw = PT_CAN_frame.buf[4];
-                 PT_CAN_msg0x3DD_buf5_Raw = PT_CAN_frame.buf[5];
-                 PT_CAN_msg0x3DD_buf6_Raw = PT_CAN_frame.buf[6];
-                 PT_CAN_msg0x3DD_buf7_Raw = PT_CAN_frame.buf[7];
-
-                 PT_CAN_msg0x3DD_buf0 = PT_CAN_msg0x3DD_buf0_Raw;
-                 PT_CAN_msg0x3DD_buf1 = PT_CAN_msg0x3DD_buf1_Raw;
-                 PT_CAN_msg0x3DD_buf2 = PT_CAN_msg0x3DD_buf2_Raw;
-                 PT_CAN_msg0x3DD_buf3 = PT_CAN_msg0x3DD_buf3_Raw;
-                 PT_CAN_msg0x3DD_buf4 = PT_CAN_msg0x3DD_buf4_Raw;
-                 PT_CAN_msg0x3DD_buf5 = PT_CAN_msg0x3DD_buf5_Raw;
-                 PT_CAN_msg0x3DD_buf6 = PT_CAN_msg0x3DD_buf6_Raw;
-                 PT_CAN_msg0x3DD_buf7 = PT_CAN_msg0x3DD_buf7_Raw;
-
-                word PaddlePositionsCAN = PT_CAN_msg0x3DD_buf7;
-                PaddlePositions = PaddlePositionsCAN;
-
-
-      if(PaddlePositions == 0x00)
-        {
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 0;
-        }
-
-      if(PaddlePositions == 0x01)
-        {
-        Paddle_DOWN_Pulled = 1;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 0;
-        }
-
-      if(PaddlePositions == 0x02)
-        {
-        
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 1;
-        BOTH_Paddles_Pulled = 0;
-        }
-
-      if(PaddlePositions == 0x03)
-        {
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 1;
-        }
-
-                                  
-            }
-
-          
-
-      // // Send Operational Statuses periodically, for TFT Module and ECU to recognize MITM Statuses
-
-      // if(LC_BumpIn_AcceptableConditions == 1) {
-
-
-      //         CAN_message_t PT_CAN_msg0x795;
-      //         PT_CAN_msg0x795.len = 8;
-      //         PT_CAN_msg0x795.id = 0x795;
-      //         PT_CAN_msg0x795.buf[0] = lowByte(LC_BumpIn_AcceptableConditions);
-      //         PT_CAN_msg0x795.buf[1] = 00;
-      //         PT_CAN_msg0x795.buf[2] = lowByte(TFT_MITM_LC_BumpIn_Status_Active_canTx);
-      //         PT_CAN_msg0x795.buf[3] = 00;
-      //         PT_CAN_msg0x795.buf[4] = lowByte(TFT_MITM_LC_BumpInActive_RollingStatus_canTx);
-      //         PT_CAN_msg0x795.buf[5] = 00;
-      //         PT_CAN_msg0x795.buf[6] = lowByte(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);
-      //         PT_CAN_msg0x795.buf[7] = highByte(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);
-
-
-
-
-      //     if (PT_CAN_canTxInterval_0x795 > 200) { // this is in millis
-      //           TFTCAN3.write(PT_CAN_msg0x795); //  CAN Frame for Yaw, Pitch, Roll
-      //           PT_CAN_canTxInterval_0x795 = 0;
-      //         }
-
-
-
-  
-  
-      //       }
-
-
-
-  }
-
-
-  
-}
-
-
-void do_TFT_MITM_LC_BumpIn_Statuses() {
-
-
-
-        if(WhlSpdRR_fromABS_Int < 5) { // Initial Determination of "Acceptable Conditions" for LC BumpIn Activation
-
-              LC_BumpIn_AcceptableConditions = 1;
-              TFT_MITM_LC_BumpIn_Status_Armed_Int = 1;
-          }
-
-          else {
-                LC_BumpIn_AcceptableConditions = 0;
-                TFT_MITM_LC_BumpIn_Status_Armed_Int = 0;
-            }
-
-
-      // Determine Launch Control Bump-in Activation BUTTON
-          if(( CruiseStalk_OFF_FromPT_CAN == 1 || Paddle_DOWN_Pulled == 1 ) && LC_BumpIn_AcceptableConditions == 1 ) { // 
-
-              LC_BumpIn_ActivationButton = 1;
-
-              }
-
-            else{ // 
-
-                    LC_BumpIn_ActivationButton = 0;
-                    TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit = 0;
-
-                    }
-
-
-      // If Launch Control Bump-In Status is Active, then Update canTx variables
-      if(LC_BumpIn_ActivationStatus == 1) {
-          TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit = LC_BumpIn_TimeSinceActivation;
-          TFT_MITM_LC_BumpIn_Status_Active_Int = 1;
-          }
-
-        else{
-            TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit = 0;
-            TFT_MITM_LC_BumpIn_Status_Active_Int = 0;
-            }
-
-
-      // Determine Rolling Status if LC Bump-In Status is active and the ABS module is showing true wheel speed > 0
-      if(LC_BumpIn_ActivationStatus == 1 && WhlSpdRR_fromABS_Float_Raw > 0.5 ) {
-          TFT_MITM_LC_BumpInActive_RollingStatus_Int = 1;
-          // TrueWhlSpdRR_fromABS_canTx_16bit = WhlSpdRR_fromABS_Float_Raw * 10;
-      }  
-      else {
-          TFT_MITM_LC_BumpInActive_RollingStatus_Int = 0;
-      }
-
-
-      // Send Operational Statuses periodically, for TFT Module and ECU to recognize MITM Statuses
-
-      // if(LC_BumpIn_AcceptableConditions == 0) {
-      if(LC_BumpIn_AcceptableConditions < 5) {
-
-            TFT_MITM_LC_BumpIn_Status_Combined_Int = ((LC_BumpIn_AcceptableConditions * 1) + (TFT_MITM_LC_BumpIn_Status_Active_Int * 1) + (TFT_MITM_LC_BumpInActive_RollingStatus_Int * 2));
-
-              CAN_message_t PT_CAN_msg0x795;
-              PT_CAN_msg0x795.len = 8;
-              PT_CAN_msg0x795.id = 0x795;
-              PT_CAN_msg0x795.buf[0] = 0x3;
-              PT_CAN_msg0x795.buf[1] =  lowByte(TFT_MITM_LC_BumpIn_Status_Combined_Int);
-              PT_CAN_msg0x795.buf[2] =  lowByte(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);
-              PT_CAN_msg0x795.buf[3] = highByte(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);
-              PT_CAN_msg0x795.buf[4] =  lowByte(TFT_MITM_LC_BumpIn_TrueWhlSpdRR_fromABS_canTx_16bit);
-              PT_CAN_msg0x795.buf[5] = highByte(TFT_MITM_LC_BumpIn_TrueWhlSpdRR_fromABS_canTx_16bit);
-              PT_CAN_msg0x795.buf[6] =  lowByte(TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_canTx_16bit);
-              PT_CAN_msg0x795.buf[7] = highByte(TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_canTx_16bit);
-
-
-
-
-          if (PT_CAN_canTxInterval_0x795 > 30) { // this is in millis
-                TFTCAN3.write(PT_CAN_msg0x795); //  CAN Frame for Yaw, Pitch, Roll
-                PT_CAN_canTxInterval_0x795 = 0;
-              }
-
-  
-  
-        }
-
-
-}
-
-
-void loop_SerialPrinting_MITM_ABS(){
-
-
-
-
-
-    if(loopDelaySerialPrint > 100) {
-                  //  Serial.println("");
-
-            Serial.print("lsbInternalCPUTemp: ");  Serial.print(lsbInternalCPUTemp);  Serial.print("\t ");
-
-            // Serial.print("ThrottleTPS_0x391_FromGateway_Mapped_Float: ");  Serial.print(ThrottleTPS_0x391_FromGateway_Mapped_Float);  Serial.print("\t ");
-            // Serial.print("ThrottleTPS_0x391_FromGatewayCAN: ");  Serial.print(ThrottleTPS_0x391_FromGatewayCAN);  Serial.print("\t ");
-            // Serial.print("AccelPedal_0x391_FromGateway_CAN: ");  Serial.print(AccelPedal_0x391_FromGateway_CAN);  Serial.print("\t ");
-            // Serial.print("AccelPedal_0x391_FromGateway_Mapped: ");  Serial.print(AccelPedal_0x391_FromGateway_Mapped);  Serial.print("\t ");
-            // Serial.print("AccelPedal_0x391_FromGateway_MapF: ");  Serial.print(AccelPedal_0x391_FromGateway_Mapped_Float);  Serial.print("\t ");
-            // Serial.print("BrakePedalSwitchStatus: ");  Serial.print(BrakePedalSwitchStatus);  Serial.print("\t ");
-            // Serial.print("BrakeSwitch_0x1AB_CAN: ");  Serial.print(BrakeSwitch_0x1AB_CAN);  Serial.print("\t");
-            // Serial.print("ParkBrakeStatus_0x104_FromGateway: ");  Serial.print(ParkBrakeStatus_0x104_FromGateway);  Serial.print("\t");
-            // Serial.print("CruiseStalk_ON_FromGateway: ");  Serial.print(CruiseStalk_ON_FromGateway);  Serial.print("\t");
-            // Serial.print("CruiseStalk_OFF_FromGateway: ");  Serial.print(CruiseStalk_OFF_FromGateway);  Serial.print("\t");
-            // Serial.print("BrakePedalSwitchStatus_FromGateway: ");  Serial.print(BrakePedalSwitchStatus_FromGateway);  Serial.print("\t"); //Good
-            // Serial.print("BrakePressureBAR_FromGateway_Float: ");  Serial.print(BrakePressureBAR_FromGateway_Float);  Serial.print("\t"); // Good
-            // Serial.print("ThrottleTPS_0x391_FromABS_Mapped_Float: ");  Serial.print(ThrottleTPS_0x391_FromABS_Mapped_Float);  Serial.print("\t");
-            // Serial.print("ThrottleTPS_0x391_FromABSCAN: ");  Serial.print(ThrottleTPS_0x391_FromABSCAN);  Serial.print("\t");
-            // Serial.print("AccelPedal_0x391_FromABS_CAN: ");  Serial.print(AccelPedal_0x391_FromABS_CAN);  Serial.print("\t");
-            // Serial.print("AccelPedal_0x391_FromABS_Mapped: ");  Serial.print(AccelPedal_0x391_FromABS_Mapped);  Serial.print("\t");
-            // Serial.print("AccelPedal_0x391_FromABS_Mapped_Float: ");  Serial.print(AccelPedal_0x391_FromABS_Mapped_Float);  Serial.print("\t");
-            // Serial.print("BrakePedalSwitchStatus: ");  Serial.print(BrakePedalSwitchStatus);  Serial.print("\t");
-            // Serial.print("BrakeSwitch_0x1AB_FromABS: ");  Serial.print(BrakeSwitch_0x1AB_FromABS);  Serial.print("\t");
-            // Serial.print("ParkBrakeStatus_0x104_FromABS: ");  Serial.print(ParkBrakeStatus_0x104_FromABS);  Serial.print("\t");
-            // Serial.print("CruiseStalk_ON_FromABS: ");  Serial.print(CruiseStalk_ON_FromABS);  Serial.print("\t");
-            // Serial.print("CruiseStalk_OFF_FromABS: ");  Serial.print(CruiseStalk_OFF_FromABS);  Serial.print("\t");
-            // Serial.print("BrakePedalSwitchStatus_FromABS: ");  Serial.print(BrakePedalSwitchStatus_FromABS);  Serial.print("\t"); //Good
-          //  Serial.print("LC_BumpIn_ActvButt: ");  Serial.print(LC_BumpIn_ActivationButton);  Serial.print("\t ");
-            Serial.print("LC_BumpIn_ActvStat: ");  Serial.print(LC_BumpIn_ActivationStatus);  Serial.print("\t ");
-            // Serial.print("CCStalk_0x120_FromGateway: ");  Serial.print(cruiseStalkStaticPosition_0x120_FromGateway);  Serial.print("\t ");
-            // Serial.print("cruiseStalkStaticPosition_0x120_PT_CAN: ");  Serial.print(cruiseStalkStaticPosition_0x120_PT_CAN);  Serial.print("\t ");
-
-            
-            Serial.print("MITM_Status_Combined_Int: ");  Serial.print(TFT_MITM_LC_BumpIn_Status_Combined_Int);  Serial.print("\t ");
-            Serial.print("MITM_TimeSinceActiveMS_16bit: ");  Serial.print(TFT_MITM_LC_BumpIn_TimeSinceActiveMS_canTx_16bit);  Serial.print("\t ");
-            Serial.print("MITM_Status_TrueWhlSpdRR_16bit: ");  Serial.print(TFT_MITM_LC_BumpIn_TrueWhlSpdRR_fromABS_canTx_16bit);  Serial.print("\t ");
-            Serial.print("MITM_Status_TrueBrkPresMPA_16bit: ");  Serial.print(TFT_MITM_LC_BumpIn_TrueBrakePressureMPA_fromABS_canTx_16bit);  Serial.print("\t ");
-
-
-
-
-            // Serial.print("LC_BumpIn_TimeSinceActivation: ");  Serial.print(LC_BumpIn_TimeSinceActivation);  Serial.print("\t ");
-            // Serial.print("BrakePedalSwitchStatus: ");  Serial.print(BrakePedalSwitchStatus);  Serial.print("\t");
-            // Serial.print("BrakePressureBAR_atTimeof_LCBumpInActivation_Float: ");  Serial.print(BrakePressureBAR_atTimeof_LCBumpInActivation_Float);  Serial.print("\t");
-            // Serial.print("BrakePressureBAR_atTimeobuf2: ");  Serial.print(BrakePressureBAR_atTimeof_LCBumpInActivation_Raw_buf2);  Serial.print("\t");
-            // Serial.print("BrakePressureBAR_atTimeobuf3: ");  Serial.print(BrakePressureBAR_atTimeof_LCBumpInActivation_Raw_buf3);  Serial.print("\t");
-            // Serial.print("BrakePressureBAR_0x106_Raw: ");  Serial.print(BrakePressureBAR_0x106_Raw);  Serial.print("\t");
-            // Serial.print("BrakePressureBAR_Float: ");  Serial.print(BrakePressureBAR_Float);  Serial.print("\t");
-            // Serial.print("BrakePressureBAR_Int: ");  Serial.print(BrakePressureBAR_Int);  Serial.print("\t");
-            // Serial.print("WhlSpdRL: ");  Serial.print(WhlSpdRL);  Serial.print("\t");
-            // Serial.print("WhlSpdRL_Raw_CAN: ");  Serial.print(WhlSpdRL_Raw_CAN);  Serial.print("\t");
-            // Serial.print("WhlSpdRR: ");  Serial.print(WhlSpdRR);  Serial.print("\t");
-            // Serial.print("WhlSpdRR_fromABS_FltRaw: ");  Serial.print(WhlSpdRR_fromABS_Float_Raw);  Serial.print("\t");
-            // Serial.print("WhlSpdRR_Raw_CAN: ");  Serial.print(WhlSpdRR_Raw_CAN);  Serial.print("\t");
-            // Serial.print("TrueWhlSpdRRFlt: ");  Serial.print(TrueWhlSpdRR_fromABS_canTx_16bit);  Serial.print("\t");
-
-            // Serial.print("WhlSpdFL: ");  Serial.print(WhlSpdFL);  Serial.print("\t");
-            // Serial.print("WhlSpdFL_Raw_CAN: ");  Serial.print(WhlSpdFL_Raw_CAN);  Serial.print("\t");
-            // Serial.print("WhlSpdFR: ");  Serial.print(WhlSpdFR);  Serial.print("\t");
-            // Serial.print("WhlSpdFR_Raw_CAN: ");  Serial.print(WhlSpdFR_Raw_CAN);  Serial.print("\t");
-
-            // BrakePedalSwitchStatus_FromABS
-
-            // Serial.print("APP_0x391_PT_CAN_MapF: ");  Serial.print(AccelPedal_0x391_PT_CAN_Mapped_Float);  Serial.print("\t ");
-            // Serial.print("CruiseStalk_ON_FromPT_CAN: ");  Serial.print(CruiseStalk_ON_FromPT_CAN);  Serial.print("\t ");
-            // Serial.print("cruiseStalkStaticPos_0x120PTCAN: ");  Serial.print(cruiseStalkStaticPosition_0x120_PTCAN_CAN);  Serial.print("\t ");
-            // Serial.print("CC_OFF_FromPT_CAN: ");  Serial.print(CruiseStalk_OFF_FromPT_CAN);  Serial.print("\t ");
-            // Serial.print("Paddle_DOWN_: ");  Serial.print(Paddle_DOWN_Pulled);  Serial.print("\t ");
-            // Serial.print("PaddlePositions: ");  Serial.print(PaddlePositions);  Serial.print("\t ");
-
-
-
-        #pragma region // DBC Parsed
-
-        // ESP - Brakes and Chassis Movement
-            // Serial.print("MQB_ESP05_0x106_BrakePressureBAR_Float: ");  Serial.print(MQB_ESP05_0x106_BrakePressureBAR_Float);  Serial.print("\t"); // Good
-            Serial.print("MQB_ESP05_0x106_BrkPrsMPA: ");  Serial.print(MQB_ESP05_0x106_BrakePressureMPA_Float);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_Brake_Pressure: ");  Serial.print(MQB_ESP05_0x106_Brake_Pressure);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_Driver_Brakes: ");  Serial.print(MQB_ESP05_0x106_Driver_Brakes);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_Status_Brake_Pressure: ");  Serial.print(MQB_ESP05_0x106_Status_Brake_Pressure);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_QBit_Driver_Brakes: ");  Serial.print(MQB_ESP05_0x106_QBit_Driver_Brakes);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_Status_Brake_Pressure: ");  Serial.print(MQB_ESP05_0x106_Status_Brake_Pressure);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_Threshold_Negative_Pressure: ");  Serial.print(MQB_ESP05_0x106_Threshold_Negative_Pressure);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ECD_0x106_Brake_Light: ");  Serial.print(MQB_ECD_0x106_Brake_Light);  Serial.print("\t"); // not good
-            // Serial.print("MQB_ESP05_0x106_Eingr_HL: ");  Serial.print(MQB_ESP05_0x106_Eingr_HL);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_Eingr_HR: ");  Serial.print(MQB_ESP05_0x106_Eingr_HR);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_Eingr_VL: ");  Serial.print(MQB_ESP05_0x106_Eingr_VL);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP05_0x106_Eingr_VR: ");  Serial.print(MQB_ESP05_0x106_Eingr_VR);  Serial.print("\t"); // Good
-            
-
-            // Serial.print("MQB_ESP_0x101_Standstill_Flag: ");  Serial.print(MQB_ESP_0x101_Standstill_Flag);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP_0x101_QBit_LongitudinalMovement: ");  Serial.print(MQB_ESP_0x101_QBit_LongitudinalMovement);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP_0x101_QBit_LateralMovement: ");  Serial.print(MQB_ESP_0x101_QBit_LateralMovement);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP_0x101_LongitudinalAcceleration: ");  Serial.print(MQB_ESP_0x101_LongitudinalAcceleration);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP_0x101_LateralAcceleration: ");  Serial.print(MQB_ESP_0x101_LateralAcceleration);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP_0x101_Yaw_Rate: ");  Serial.print(MQB_ESP_0x101_Yaw_Rate);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP_0x101_PLA_Abort: ");  Serial.print(MQB_ESP_0x101_PLA_Abort);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP_0x101_Status_ESP_PLA: ");  Serial.print(MQB_ESP_0x101_Status_ESP_PLA);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP_0x101_QBit_Initial_Value_Wank: ");  Serial.print(MQB_ESP_0x101_QBit_Initial_Value_Wank);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP_0x101_DistributionWankmom: ");  Serial.print(MQB_ESP_0x101_Distribution_Wankmom);  Serial.print(" \t "); // Good
-
-
-            // Serial.print("MQB_ESP08_0x11E_Slipping_Stillstand: ");  Serial.print(MQB_ESP08_0x11E_Slipping_Stillstand);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP08_0x11E_StandStillPhase_Exhausted: ");  Serial.print(MQB_ESP08_0x11E_StandStillPhase_Exhausted);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESC_0x11E_Brake_Pressure_Gradient: ");  Serial.print(MQB_ESC_0x11E_Brake_Pressure_Gradient);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP08_0x11E_VehicleSpeed_ref_Direction_Of_Travel: ");  Serial.print(MQB_ESP08_0x11E_VehicleSpeed_ref_Direction_Of_Travel);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP08_0x11E_VehicleSpeed_ref: ");  Serial.print(MQB_ESP08_0x11E_VehicleSpeed_ref);  Serial.print(" \t "); // Good
-
-            // Serial.print("MQB_ESP10_0x116_HL_Direction_of_Travel: ");  Serial.print(MQB_ESP10_0x116_HL_Direction_of_Travel);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP10_0x116_HR_Direction_of_Travel: ");  Serial.print(MQB_ESP10_0x116_HR_Direction_of_Travel);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP10_0x116_VL_Direction_of_Travel: ");  Serial.print(MQB_ESP10_0x116_VL_Direction_of_Travel);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP10_0x116_VR_Direction_of_Travel: ");  Serial.print(MQB_ESP10_0x116_VR_Direction_of_Travel);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP10_0x116_Path_Impulse_HL: ");  Serial.print(MQB_ESP10_0x116_Path_Impulse_HL);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP10_0x116_Path_Impulse_HR: ");  Serial.print(MQB_ESP10_0x116_Path_Impulse_HR);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP10_0x116_Path_Impulse_VL: ");  Serial.print(MQB_ESP10_0x116_Path_Impulse_VL);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP10_0x116_Path_Impulse_VR: ");  Serial.print(MQB_ESP10_0x116_Path_Impulse_VR);  Serial.print(" \t "); // Good
-           
-           
-            // Serial.print("MQB_GE_0x3C8_amax_Possible: ");  Serial.print(MQB_GE_0x3C8_amax_Possible);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_GE_0x3C8_LaunchControl: ");  Serial.print(MQB_GE_0x3C8_LaunchControl);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_GE_0x3C8_Sumpftemperatur: ");  Serial.print(MQB_GE_0x3C8_Sumpftemperatur);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_GE_0x3C8_TorqueLoss: ");  Serial.print(MQB_GE_0x3C8_TorqueLoss);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_GE_0x3C8_OBD_Status: ");  Serial.print(MQB_GE_0x3C8_OBD_Status);  Serial.print(" \t "); // Good
-
-            // Serial.print("MQB_ESP07_0x392_RTA_HL: ");  Serial.print(MQB_ESP07_0x392_RTA_HL);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP07_0x392_RTA_HR: ");  Serial.print(MQB_ESP07_0x392_RTA_HR);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_ESP07_0x392_RTA_VR: ");  Serial.print(MQB_ESP07_0x392_RTA_VR);  Serial.print(" \t "); // Good
-
-            // Serial.print("MQB_OBD_0x392_Wheel_Sensor_Error_HL: ");  Serial.print(MQB_OBD_0x392_Wheel_Sensor_Error_HL);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_OBD_0x392_Wheel_Sensor_Error_HR: ");  Serial.print(MQB_OBD_0x392_Wheel_Sensor_Error_HR);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_OBD_0x392_Wheel_Sensor_Error_VL: ");  Serial.print(MQB_OBD_0x392_Wheel_Sensor_Error_VL);  Serial.print(" \t "); // Good
-            // Serial.print("MQB_OBD_0x392_Wheel_Sensor_Error_VR: ");  Serial.print(MQB_OBD_0x392_Wheel_Sensor_Error_VR);  Serial.print(" \t "); // Good
-
-
-          
-            // Serial.print("MQB_ESC_0xFD_v_Signal_Qualifier_High_Low: ");  Serial.print(MQB_ESC_0xFD_v_Signal_Qualifier_High_Low);  Serial.print("\t"); // Good
-            // Serial.print("MQB_BR_0xFD_Engagement_Torque: ");  Serial.print(MQB_BR_0xFD_Engagement_Torque);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ABS_0xFD_Braking: ");  Serial.print(MQB_ABS_0xFD_Braking);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ASR_0xFD_Intervention_Switch: ");  Serial.print(MQB_ASR_0xFD_Intervention_Switch);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESC_0xFD_Reku_Release: ");  Serial.print(MQB_ESC_0xFD_Reku_Release);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP21_0xFD_ASP: ");  Serial.print(MQB_ESP21_0xFD_ASP);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP21_0xFD_QBit_v_Signal: ");  Serial.print(MQB_ESP21_0xFD_QBit_v_Signal);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP21_0xFD_VehicleSpeed_Signal: ");  Serial.print(MQB_ESP21_0xFD_VehicleSpeed_Signal);  Serial.print("\t"); // Good
-            
-            
-            // Serial.print("MQB_ESP_0xB2_HL_Wheel_Speed_02: ");  Serial.print(MQB_ESP_0xB2_HL_Wheel_Speed_02);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP_0xB2_HR_Wheel_Speed_02: ");  Serial.print(MQB_ESP_0xB2_HR_Wheel_Speed_02);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP_0xB2_VL_Wheel_Speed_02: ");  Serial.print(MQB_ESP_0xB2_VL_Wheel_Speed_02);  Serial.print("\t"); // Good
-            // Serial.print("MQB_ESP_0xB2_VR_Wheel_Speed_02: ");  Serial.print(MQB_ESP_0xB2_VR_Wheel_Speed_02);  Serial.print("\t"); // Good
-
-
-
-            #pragma endregion
-
-
-            Serial.println("");
-
-            loopDelaySerialPrint = 0;
-        }
-
-
-
-  }
-
-
-
-   #pragma endregion
- 
-
-
-
-
- 
-  #pragma region  // MITM - TCU Node  
-
-
-// Poll TFTCAN1(Wired to TCU side of interruption) - direct callback from TFTCAN1 to TFTCAN2 (unmodified TCU data)
-void loop_TFTCAN1_poll_MITM_TCU() {
-  CAN_message_t fromTCU_frame;
-  CAN_message_t fromTCU_frame_mod;
-
-  // CAN2 → CAN1
-  while (TFTCAN1.read(fromTCU_frame)) {
-    //  printFrame(fromTCU_frame, 2);  // 2 - Printing Raw Messages received on Can2
-            TFTCAN2.write(fromTCU_frame);
-            // printFrame(fromTCU_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-
-            
-      #pragma endregion
-
-
-    }
- }
-
-  // Poll TFTCAN2 (Wired to PT_CAN on ECU/Gateway side of interruption), modify when a torque reporting modification is requested
-void loop_TFTCAN2_poll_MITM_TCU() {
-  CAN_message_t fromGateway_frame;
-  CAN_message_t fromGateway_frame_mod;
-
-  // CAN1 → CAN2
-    // Simple PT_CAN Sniffing for now
-    while (TFTCAN2.read(fromGateway_frame)) {
- 
-// Serial.println("TFTCAN2 recieved");
-
-
-        if (fromGateway_frame.id == 0x120) {  // 0x120 / 288 - TSK_06 - Operational Statuses and Cruise Control on/off
-                //  printFrame(fromGateway_frame, 3);  // 3 - Printing Raw Messages received on Can3
-                // digitalToggle(52);
-
-            #pragma region // 
-
-              TSK_06_t tsk06 = parse_TSK_06(fromGateway_frame);
-
-              MQB_TSK_0x120_MainSwitch_CruiseControl_ONOFF = tsk06.TSK_MainSwitch_CruiseControl_ONOFF;
-
-              PT_CAN_msg0x120_buf0_Raw = fromGateway_frame.buf[0];
-              PT_CAN_msg0x120_buf1_Raw = fromGateway_frame.buf[1];
-              PT_CAN_msg0x120_buf2_Raw = fromGateway_frame.buf[2];
-              PT_CAN_msg0x120_buf3_Raw = fromGateway_frame.buf[3];
-              PT_CAN_msg0x120_buf4_Raw = fromGateway_frame.buf[4];
-              PT_CAN_msg0x120_buf5_Raw = fromGateway_frame.buf[5];
-              PT_CAN_msg0x120_buf6_Raw = fromGateway_frame.buf[6];
-              PT_CAN_msg0x120_buf7_Raw = fromGateway_frame.buf[7];  
-
-              PT_CAN_msg0x120_buf0 = PT_CAN_msg0x120_buf0_Raw;
-              PT_CAN_msg0x120_buf1 = PT_CAN_msg0x120_buf1_Raw;
-              PT_CAN_msg0x120_buf2 = PT_CAN_msg0x120_buf2_Raw;
-              PT_CAN_msg0x120_buf3 = PT_CAN_msg0x120_buf3_Raw;
-              PT_CAN_msg0x120_buf4 = PT_CAN_msg0x120_buf4_Raw;
-              PT_CAN_msg0x120_buf5 = PT_CAN_msg0x120_buf5_Raw;
-              PT_CAN_msg0x120_buf6 = PT_CAN_msg0x120_buf6_Raw;
-              PT_CAN_msg0x120_buf7 = PT_CAN_msg0x120_buf7_Raw;
-
-
-            Serial.print("MQB_TSK_0x120_MainSwitch_CruiseControl_ONOFF: "); Serial.print(MQB_TSK_0x120_MainSwitch_CruiseControl_ONOFF); Serial.print("\t");
-            Serial.println("");
-
-                  
-          #pragma endregion
-
-          
-       }
-
-        if (fromGateway_frame.id == 0x121){ // Motor_20 - general engine operations
-              //  printFrame(fromGateway_frame, 3);  // 3 - Printing Raw Messages received
+        if (fromECU_frame.id == 0x121){ // Motor_20 - general engine operations
+              //  printFrame(fromECU_frame, 3);  // 3 - Printing Raw Messages received
             // Serial.println("tftcan3 recieved");
 
 
-              Motor_20_t motor20 = parse_Motor_20(fromGateway_frame);
+              Motor_20_t motor20 = parse_Motor_20(fromECU_frame);
 
               MQB_MO_20_0x121_AccelPedalRaw_01 = motor20.MO_AccelPedalRaw_01;
               MQB_MO_20_0x121_rel_IntakeManifoldPressure = motor20.MO_rel_IntakeManifoldPressure;
@@ -3510,35 +3674,35 @@ void loop_TFTCAN2_poll_MITM_TCU() {
 
 
 
-              PT_CAN_msg0x121_buf0_Raw = fromGateway_frame.buf[0];
-              PT_CAN_msg0x121_buf1_Raw = fromGateway_frame.buf[1];
-              PT_CAN_msg0x121_buf2_Raw = fromGateway_frame.buf[2];
-              PT_CAN_msg0x121_buf3_Raw = fromGateway_frame.buf[3];
-              PT_CAN_msg0x121_buf4_Raw = fromGateway_frame.buf[4];
-              PT_CAN_msg0x121_buf5_Raw = fromGateway_frame.buf[5];
-              PT_CAN_msg0x121_buf6_Raw = fromGateway_frame.buf[6];
-              PT_CAN_msg0x121_buf7_Raw = fromGateway_frame.buf[7];
+              PT_CAN_msg0x121_buf0_Raw = fromECU_frame.buf[0];
+              PT_CAN_msg0x121_buf1_Raw = fromECU_frame.buf[1];
+              PT_CAN_msg0x121_buf2_Raw = fromECU_frame.buf[2];
+              PT_CAN_msg0x121_buf3_Raw = fromECU_frame.buf[3];
+              PT_CAN_msg0x121_buf4_Raw = fromECU_frame.buf[4];
+              PT_CAN_msg0x121_buf5_Raw = fromECU_frame.buf[5];
+              PT_CAN_msg0x121_buf6_Raw = fromECU_frame.buf[6];
+              PT_CAN_msg0x121_buf7_Raw = fromECU_frame.buf[7];
 
-              PT_CAN_msg0x121_FromGateway_buf0 = PT_CAN_msg0x121_buf0_Raw;
-              PT_CAN_msg0x121_FromGateway_buf1 = PT_CAN_msg0x121_buf1_Raw;
-              PT_CAN_msg0x121_FromGateway_buf2 = PT_CAN_msg0x121_buf2_Raw;
-              PT_CAN_msg0x121_FromGateway_buf3 = PT_CAN_msg0x121_buf3_Raw;
-              PT_CAN_msg0x121_FromGateway_buf4 = PT_CAN_msg0x121_buf4_Raw;
-              PT_CAN_msg0x121_FromGateway_buf5 = PT_CAN_msg0x121_buf5_Raw;
-              PT_CAN_msg0x121_FromGateway_buf6 = PT_CAN_msg0x121_buf6_Raw;
-              PT_CAN_msg0x121_FromGateway_buf7 = PT_CAN_msg0x121_buf7_Raw;
+              PT_CAN_msg0x121_FromECU_buf0 = PT_CAN_msg0x121_buf0_Raw;
+              PT_CAN_msg0x121_FromECU_buf1 = PT_CAN_msg0x121_buf1_Raw;
+              PT_CAN_msg0x121_FromECU_buf2 = PT_CAN_msg0x121_buf2_Raw;
+              PT_CAN_msg0x121_FromECU_buf3 = PT_CAN_msg0x121_buf3_Raw;
+              PT_CAN_msg0x121_FromECU_buf4 = PT_CAN_msg0x121_buf4_Raw;
+              PT_CAN_msg0x121_FromECU_buf5 = PT_CAN_msg0x121_buf5_Raw;
+              PT_CAN_msg0x121_FromECU_buf6 = PT_CAN_msg0x121_buf6_Raw;
+              PT_CAN_msg0x121_FromECU_buf7 = PT_CAN_msg0x121_buf7_Raw;
 
 
                                   
             }
 
-        if (fromGateway_frame.id == 0x12B) {  // GRA_Acc_01 - CruiseControl Stalk/Buttons
-                //  printFrame(fromGateway_frame, 3);  // 3 - Printing Raw Messages received on Can3
+        if (fromECU_frame.id == 0x12B) {  // GRA_Acc_01 - CruiseControl Stalk/Buttons
+                //  printFrame(fromECU_frame, 3);  // 3 - Printing Raw Messages received on Can3
                 // digitalToggle(52);
 
-            #pragma region // 
+          #pragma region // 
 
-              GRA_ACC_01_t cruise01 = parse_GRA_ACC_01(fromGateway_frame);
+              GRA_ACC_01_t cruise01 = parse_GRA_ACC_01(fromECU_frame);
 
               MQB_GRA_0x12B_CruiseControl_MainSwitch = cruise01.GRA_CruiseControl_MainSwitch;
               MQB_GRA_0x12B_CruiseControl_Cancel  = cruise01.GRA_CruiseControl_Cancel;
@@ -3550,24 +3714,24 @@ void loop_TFTCAN2_poll_MITM_TCU() {
               MQB_GRA_0x12B_CruiseControl_Typ_MainSwitch = cruise01.GRA_CruiseControl_Typ_MainSwitch ;
               MQB_GRA_0x12B_CruiseControl_AdjustmentTimeGap = cruise01.GRA_CruiseControl_AdjustmentTimeGap;
  
-              PT_CAN_msg0x12B_buf0_Raw = fromGateway_frame.buf[0];
-              PT_CAN_msg0x12B_buf1_Raw = fromGateway_frame.buf[1];
-              PT_CAN_msg0x12B_buf2_Raw = fromGateway_frame.buf[2];
-              PT_CAN_msg0x12B_buf3_Raw = fromGateway_frame.buf[3];
-              PT_CAN_msg0x12B_buf4_Raw = fromGateway_frame.buf[4];
-              PT_CAN_msg0x12B_buf5_Raw = fromGateway_frame.buf[5];
-              PT_CAN_msg0x12B_buf6_Raw = fromGateway_frame.buf[6];
-              PT_CAN_msg0x12B_buf7_Raw = fromGateway_frame.buf[7];  
+              PT_CAN_msg0x12B_buf0_Raw = fromECU_frame.buf[0];
+              PT_CAN_msg0x12B_buf1_Raw = fromECU_frame.buf[1];
+              PT_CAN_msg0x12B_buf2_Raw = fromECU_frame.buf[2];
+              PT_CAN_msg0x12B_buf3_Raw = fromECU_frame.buf[3];
+              PT_CAN_msg0x12B_buf4_Raw = fromECU_frame.buf[4];
+              PT_CAN_msg0x12B_buf5_Raw = fromECU_frame.buf[5];
+              PT_CAN_msg0x12B_buf6_Raw = fromECU_frame.buf[6];
+              PT_CAN_msg0x12B_buf7_Raw = fromECU_frame.buf[7];  
 
 
-              PT_CAN_msg0x12B_FromGateway_buf0 = PT_CAN_msg0x12B_buf0_Raw;
-              PT_CAN_msg0x12B_FromGateway_buf1 = PT_CAN_msg0x12B_buf1_Raw;
-              PT_CAN_msg0x12B_FromGateway_buf2 = PT_CAN_msg0x12B_buf2_Raw;
-              PT_CAN_msg0x12B_FromGateway_buf3 = PT_CAN_msg0x12B_buf3_Raw;
-              PT_CAN_msg0x12B_FromGateway_buf4 = PT_CAN_msg0x12B_buf4_Raw;
-              PT_CAN_msg0x12B_FromGateway_buf5 = PT_CAN_msg0x12B_buf5_Raw;
-              PT_CAN_msg0x12B_FromGateway_buf6 = PT_CAN_msg0x12B_buf6_Raw;
-              PT_CAN_msg0x12B_FromGateway_buf7 = PT_CAN_msg0x12B_buf7_Raw;
+              PT_CAN_msg0x12B_FromECU_buf0 = PT_CAN_msg0x12B_buf0_Raw;
+              PT_CAN_msg0x12B_FromECU_buf1 = PT_CAN_msg0x12B_buf1_Raw;
+              PT_CAN_msg0x12B_FromECU_buf2 = PT_CAN_msg0x12B_buf2_Raw;
+              PT_CAN_msg0x12B_FromECU_buf3 = PT_CAN_msg0x12B_buf3_Raw;
+              PT_CAN_msg0x12B_FromECU_buf4 = PT_CAN_msg0x12B_buf4_Raw;
+              PT_CAN_msg0x12B_FromECU_buf5 = PT_CAN_msg0x12B_buf5_Raw;
+              PT_CAN_msg0x12B_FromECU_buf6 = PT_CAN_msg0x12B_buf6_Raw;
+              PT_CAN_msg0x12B_FromECU_buf7 = PT_CAN_msg0x12B_buf7_Raw;
 
                 cruiseStalk_byte1CAN = PT_CAN_msg0x12B_buf1_Raw;
                 cruiseStalk_byte1 = cruiseStalk_byte1CAN;
@@ -3583,44 +3747,133 @@ void loop_TFTCAN2_poll_MITM_TCU() {
                   
           #pragma endregion
 
+
+
+          #pragma region      // Process 0x12b byte 2 - Cruise Stalk Movement Position
+
+            if(cruiseStalk == 128) { // 0x40 or 0x80 =cruise Stalk in Default ON position, no button pressed
+                CruiseStalk_ON = 1;
+                CruiseStalk_SET = 0;
+                CruiseStalk_DOWN = 0;
+                CruiseStalk_UP = 0;
+                CruiseStalk_RES = 0;
+                CruiseStalk_DistanceUP = 0;
+                CruiseStalk_DistanceDOWN = 0;
+                }
+
+                CruiseStalk_ON_bit = bitRead(cruiseStalk_byte1,4 );
+
+
+            // if(cruiseStalk == 129 || cruiseStalk == 65) { // 0x41 or 0x81 =cruise SET button pressed
+            //     CruiseStalk_SET = 1;
+            //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+            //     }
+            //   else {
+            //     CruiseStalk_SET = 0;
+            //       }
+                CruiseStalk_SET_bit = bitRead(cruiseStalk, 0);
+
+
+            // if(cruiseStalk == 130 || cruiseStalk == 66) { // 0x42 or 0x82 =cruise stalk moved UP/towards ceiling
+            //     CruiseStalk_UP = 1;
+            //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+            //       }
+            //   else {
+            //     CruiseStalk_UP = 0;
+            //       }
+                CruiseStalk_UP_bit = bitRead(cruiseStalk, 1);
+
+
+            // if(cruiseStalk == 132) { // 0x44 or 0x84 =cruise stalk moved DOWN/towards floor
+            //     CruiseStalk_DOWN = 1;
+            //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+            //     }
+            //   else {
+            //     CruiseStalk_DOWN = 0;
+            //       }
+                CruiseStalk_DOWN_bit = bitRead(cruiseStalk, 2);
+
+
+            // if(cruiseStalk == 136) { // 0x48 or 0x88 =cruise stalk moved Backwards/towards Driver
+            //     CruiseStalk_RES = 1;
+            //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+            //     }
+            //   else {
+            //     CruiseStalk_RES = 0;
+            //       }
+                CruiseStalk_RES_bit = bitRead(cruiseStalk, 3);
+
+
+            // if(cruiseStalk == 144) { // 0x4 or 0xA0 =cruise stalk up/down distance switch moved DOWN/towards floor
+            //     CruiseStalk_DistanceDOWN = 1;
+            //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+            //     }
+            //   else {
+            //     CruiseStalk_DistanceDOWN = 0;
+            //       }
+                CruiseStalk_DistanceDOWN_bit = bitRead(cruiseStalk, 4);
+
+
+            // if(cruiseStalk == 160) { // 0x4 or 0xA0 =cruise stalk up/down distance switch moved UP/towards ceiling
+            //     CruiseStalk_DistanceUP = 1;
+            //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+            //     }
+            //   else {
+            //     CruiseStalk_DistanceUP = 0;
+            //       }
+                CruiseStalk_DistanceUP_bit = bitRead(cruiseStalk, 5);
+
+
+            // if(cruiseStalk_byte1 > 40) { // 0xx or 0xx =cruise stalk moved Forward/towards Engine
+            //     CruiseStalk_FORWARD = 1;
+            //     // ConfigurationUpdateMode1_TimeoutTimer = 0;
+            //     }
+            //   else {
+            //     CruiseStalk_FORWARD = 0;
+            //       }
+                CruiseStalk_FORWARD_bit = bitRead(cruiseStalk_byte1, 5);
+
+      if(CruiseStalk_RES_bit ==1 ) {
+        digitalWrite(49, HIGH);
+      }
+
+          #pragma endregion
+
+
+
           
        }
 
 
-
-
-          if (fromGateway_frame.id == 0x391){ // Torque Demand/TPS/Accel Pedal 
+        if (fromECU_frame.id == 0x391){ // Torque Demand/TPS/Accel Pedal 
 
           //  Serial.print("MB "); Serial.print(PT_CAN_msg0x391.mb);
           //  Serial.print(" ID: "); Serial.print(PT_CAN_msg0x391.id, HEX);
           //  Serial.print(" Buffer: ");
-          for (uint8_t i = 0; i < fromGateway_frame.len; i++)
+          for (uint8_t i = 0; i < fromECU_frame.len; i++)
           {
               //  Serial.print(PT_CAN_msg0x391.buf[i], HEX); Serial.print(" ");
           }
                 // Serial.println("  ");
 
 
+                PT_CAN_msg0x391_buf0_Raw = fromECU_frame.buf[0];
+                PT_CAN_msg0x391_buf1_Raw = fromECU_frame.buf[1];
+                PT_CAN_msg0x391_buf2_Raw = fromECU_frame.buf[2];
+                PT_CAN_msg0x391_buf3_Raw = fromECU_frame.buf[3];
+                PT_CAN_msg0x391_buf4_Raw = fromECU_frame.buf[4];
+                PT_CAN_msg0x391_buf5_Raw = fromECU_frame.buf[5];
+                PT_CAN_msg0x391_buf6_Raw = fromECU_frame.buf[6];
+                PT_CAN_msg0x391_buf7_Raw = fromECU_frame.buf[7];  
 
-
-
-                PT_CAN_msg0x391_buf0_Raw = fromGateway_frame.buf[0];
-                PT_CAN_msg0x391_buf1_Raw = fromGateway_frame.buf[1];
-                PT_CAN_msg0x391_buf2_Raw = fromGateway_frame.buf[2];
-                PT_CAN_msg0x391_buf3_Raw = fromGateway_frame.buf[3];
-                PT_CAN_msg0x391_buf4_Raw = fromGateway_frame.buf[4];
-                PT_CAN_msg0x391_buf5_Raw = fromGateway_frame.buf[5];
-                PT_CAN_msg0x391_buf6_Raw = fromGateway_frame.buf[6];
-                PT_CAN_msg0x391_buf7_Raw = fromGateway_frame.buf[7];  
-
-                PT_CAN_msg0x391_FromGateway_buf0 = PT_CAN_msg0x391_buf0_Raw;
-                PT_CAN_msg0x391_FromGateway_buf1 = PT_CAN_msg0x391_buf1_Raw;
-                PT_CAN_msg0x391_FromGateway_buf2 = PT_CAN_msg0x391_buf2_Raw;
-                PT_CAN_msg0x391_FromGateway_buf3 = PT_CAN_msg0x391_buf3_Raw;
-                PT_CAN_msg0x391_FromGateway_buf4 = PT_CAN_msg0x391_buf4_Raw;
-                PT_CAN_msg0x391_FromGateway_buf5 = PT_CAN_msg0x391_buf5_Raw;
-                PT_CAN_msg0x391_FromGateway_buf6 = PT_CAN_msg0x391_buf6_Raw;
-                PT_CAN_msg0x391_FromGateway_buf7 = PT_CAN_msg0x391_buf7_Raw;  
+                PT_CAN_msg0x391_FromECU_buf0 = PT_CAN_msg0x391_buf0_Raw;
+                PT_CAN_msg0x391_FromECU_buf1 = PT_CAN_msg0x391_buf1_Raw;
+                PT_CAN_msg0x391_FromECU_buf2 = PT_CAN_msg0x391_buf2_Raw;
+                PT_CAN_msg0x391_FromECU_buf3 = PT_CAN_msg0x391_buf3_Raw;
+                PT_CAN_msg0x391_FromECU_buf4 = PT_CAN_msg0x391_buf4_Raw;
+                PT_CAN_msg0x391_FromECU_buf5 = PT_CAN_msg0x391_buf5_Raw;
+                PT_CAN_msg0x391_FromECU_buf6 = PT_CAN_msg0x391_buf6_Raw;
+                PT_CAN_msg0x391_FromECU_buf7 = PT_CAN_msg0x391_buf7_Raw;  
 
 
 
@@ -3650,99 +3903,154 @@ void loop_TFTCAN2_poll_MITM_TCU() {
                 
             }
 
-          if (fromGateway_frame.id == 0x3DD){ // paddles
-// Serial.println("TFTCAN2 recieved");
+        if (fromECU_frame.id == 0x394){ // Gear Selector Position/TIP mode status, as well as Tgt Gear/Current Gear from TCU
 
 
-                 PT_CAN_msg0x3DD_buf0_Raw = fromGateway_frame.buf[0];
-                 PT_CAN_msg0x3DD_buf1_Raw = fromGateway_frame.buf[1];
-                 PT_CAN_msg0x3DD_buf2_Raw = fromGateway_frame.buf[2];
-                 PT_CAN_msg0x3DD_buf3_Raw = fromGateway_frame.buf[3];
-                 PT_CAN_msg0x3DD_buf4_Raw = fromGateway_frame.buf[4];
-                 PT_CAN_msg0x3DD_buf5_Raw = fromGateway_frame.buf[5];
-                 PT_CAN_msg0x3DD_buf6_Raw = fromGateway_frame.buf[6];
-                 PT_CAN_msg0x3DD_buf7_Raw = fromGateway_frame.buf[7];
+              PT_CAN_msg0x394_buf0_Raw = fromECU_frame.buf[0];
+              PT_CAN_msg0x394_buf1_Raw = fromECU_frame.buf[1];
+              PT_CAN_msg0x394_buf2_Raw = fromECU_frame.buf[2];
+              PT_CAN_msg0x394_buf3_Raw = fromECU_frame.buf[3];
+              PT_CAN_msg0x394_buf4_Raw = fromECU_frame.buf[4];
+              PT_CAN_msg0x394_buf5_Raw = fromECU_frame.buf[5];
+              PT_CAN_msg0x394_buf6_Raw = fromECU_frame.buf[6];
+              PT_CAN_msg0x394_buf7_Raw = fromECU_frame.buf[7];  
 
-                 PT_CAN_msg0x3DD_FromGateway_buf0 = PT_CAN_msg0x3DD_buf0_Raw;
-                 PT_CAN_msg0x3DD_FromGateway_buf1 = PT_CAN_msg0x3DD_buf1_Raw;
-                 PT_CAN_msg0x3DD_FromGateway_buf2 = PT_CAN_msg0x3DD_buf2_Raw;
-                 PT_CAN_msg0x3DD_FromGateway_buf3 = PT_CAN_msg0x3DD_buf3_Raw;
-                 PT_CAN_msg0x3DD_FromGateway_buf4 = PT_CAN_msg0x3DD_buf4_Raw;
-                 PT_CAN_msg0x3DD_FromGateway_buf5 = PT_CAN_msg0x3DD_buf5_Raw;
-                 PT_CAN_msg0x3DD_FromGateway_buf6 = PT_CAN_msg0x3DD_buf6_Raw;
-                 PT_CAN_msg0x3DD_FromGateway_buf7 = PT_CAN_msg0x3DD_buf7_Raw;
+              PT_CAN_msg0x394_FromECU_buf0 = PT_CAN_msg0x394_buf0_Raw;
+              PT_CAN_msg0x394_FromECU_buf1 = PT_CAN_msg0x394_buf1_Raw;
+              PT_CAN_msg0x394_FromECU_buf2 = PT_CAN_msg0x394_buf2_Raw;
+              PT_CAN_msg0x394_FromECU_buf3 = PT_CAN_msg0x394_buf3_Raw;
+              PT_CAN_msg0x394_FromECU_buf4 = PT_CAN_msg0x394_buf4_Raw;
+              PT_CAN_msg0x394_FromECU_buf5 = PT_CAN_msg0x394_buf5_Raw;
+              PT_CAN_msg0x394_FromECU_buf6 = PT_CAN_msg0x394_buf6_Raw;
+              PT_CAN_msg0x394_FromECU_buf7 = PT_CAN_msg0x394_buf7_Raw;  
+
+          
+              unsigned char myByteTgtGear2 = PT_CAN_msg0x394_buf1_Raw; // Example byte
+              int startBit0x394 = 4; // Starting position of the range (0-indexed)
+              int numBits0x394 = 4;  // Number of bits to extract
+
+              // Create a mask with 'numBits' set to 1
+              unsigned char mask0x394 = (1 << numBits0x394) - 1; 
+
+              // Shift the desired range to the least significant position and then apply the mask
+              unsigned char extractedBitsTgtGear2 = (myByteTgtGear2 >> startBit0x394) & mask0x394;
+
+              DQ500_TargetGear2_0x394_CAN = extractedBitsTgtGear2;
+              DQ500_TargetGear2_0x394 = DQ500_TargetGear2_0x394_CAN;
 
 
 
-                      word PaddlePositionsCAN = PT_CAN_msg0x3DD_buf7;
-                      PaddlePositions = PaddlePositionsCAN;
 
-      if(PaddlePositions == 0x00)
-        {
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 0;
-        }
 
-      if(PaddlePositions == 0x01)
-        {
-        Paddle_DOWN_Pulled = 1;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 0;
-        }
+              DQ500_TargetGear_0x394_CAN = PT_CAN_msg0x394_buf2_Raw;
+              DQ500_TargetGear_0x394 = DQ500_TargetGear_0x394_CAN;
 
-      if(PaddlePositions == 0x02)
-        {
-        
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 1;
-        BOTH_Paddles_Pulled = 0;
-        }
+              DQ500_CurrentGear_0x394_CAN = PT_CAN_msg0x394_buf3_Raw;
+              DQ500_CurrentGear_0x394 = DQ500_CurrentGear_0x394_CAN;
 
-      if(PaddlePositions == 0x03)
-        {
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 1;
-        }
 
-                                  
+
+              if(PT_CAN_msg0x394_buf5_Raw > 0x10) {
+                    GearLeverPosition_TIP = 1;
+                }
+              else {
+                    GearLeverPosition_TIP = 0;
+                }
+
+
+
+          }
+       
+
+
+        if (fromECU_frame.id == 0x3DD){ // paddles
+        // Serial.println("tftcan3 recieved");
+
+
+              PT_CAN_msg0x3DD_buf0_Raw = fromECU_frame.buf[0];
+              PT_CAN_msg0x3DD_buf1_Raw = fromECU_frame.buf[1];
+              PT_CAN_msg0x3DD_buf2_Raw = fromECU_frame.buf[2];
+              PT_CAN_msg0x3DD_buf3_Raw = fromECU_frame.buf[3];
+              PT_CAN_msg0x3DD_buf4_Raw = fromECU_frame.buf[4];
+              PT_CAN_msg0x3DD_buf5_Raw = fromECU_frame.buf[5];
+              PT_CAN_msg0x3DD_buf6_Raw = fromECU_frame.buf[6];
+              PT_CAN_msg0x3DD_buf7_Raw = fromECU_frame.buf[7];
+
+              PT_CAN_msg0x3DD_FromECU_buf0 = PT_CAN_msg0x3DD_buf0_Raw;
+              PT_CAN_msg0x3DD_FromECU_buf1 = PT_CAN_msg0x3DD_buf1_Raw;
+              PT_CAN_msg0x3DD_FromECU_buf2 = PT_CAN_msg0x3DD_buf2_Raw;
+              PT_CAN_msg0x3DD_FromECU_buf3 = PT_CAN_msg0x3DD_buf3_Raw;
+              PT_CAN_msg0x3DD_FromECU_buf4 = PT_CAN_msg0x3DD_buf4_Raw;
+              PT_CAN_msg0x3DD_FromECU_buf5 = PT_CAN_msg0x3DD_buf5_Raw;
+              PT_CAN_msg0x3DD_FromECU_buf6 = PT_CAN_msg0x3DD_buf6_Raw;
+              PT_CAN_msg0x3DD_FromECU_buf7 = PT_CAN_msg0x3DD_buf7_Raw;
+
+
+
+              word PaddlePositionsCAN = PT_CAN_msg0x3DD_buf7;
+              PaddlePositions = PaddlePositionsCAN;
+
+              if(PaddlePositions == 0x00)
+                {
+                Paddle_DOWN_Pulled = 0;
+                Paddle_UP_Pulled = 0;
+                BOTH_Paddles_Pulled = 0;
+                }
+
+              if(PaddlePositions == 0x01)
+                {
+                Paddle_DOWN_Pulled = 1;
+                Paddle_UP_Pulled = 0;
+                BOTH_Paddles_Pulled = 0;
+                }
+
+              if(PaddlePositions == 0x02)
+                {
+                
+                Paddle_DOWN_Pulled = 0;
+                Paddle_UP_Pulled = 1;
+                BOTH_Paddles_Pulled = 0;
+                }
+
+              if(PaddlePositions == 0x03)
+                {
+                Paddle_DOWN_Pulled = 0;
+                Paddle_UP_Pulled = 0;
+                BOTH_Paddles_Pulled = 1;
+                }
+
+                                          
             }
 
-         
-
-
-          if (fromGateway_frame.id == 0xA7){ // Engine Torque Actuals - from ECU
+        
+        if (fromECU_frame.id == 0xA7){ // Engine Torque Actuals - from ECU
                 // Serial.println("TFTCAN2 recieved");
 
+            #pragma region // Motor 11 - CAN bytes Raw
 
-                #pragma region // Motor 11 - CAN bytes Raw
+                 PT_CAN_msg0xA7_buf0_Raw = fromECU_frame.buf[0];
+                 PT_CAN_msg0xA7_buf1_Raw = fromECU_frame.buf[1];
+                 PT_CAN_msg0xA7_buf2_Raw = fromECU_frame.buf[2];
+                 PT_CAN_msg0xA7_buf3_Raw = fromECU_frame.buf[3];
+                 PT_CAN_msg0xA7_buf4_Raw = fromECU_frame.buf[4];
+                 PT_CAN_msg0xA7_buf5_Raw = fromECU_frame.buf[5];
+                 PT_CAN_msg0xA7_buf6_Raw = fromECU_frame.buf[6];
+                 PT_CAN_msg0xA7_buf7_Raw = fromECU_frame.buf[7];
 
-
-
-                 PT_CAN_msg0xA7_buf0_Raw = fromGateway_frame.buf[0];
-                 PT_CAN_msg0xA7_buf1_Raw = fromGateway_frame.buf[1];
-                 PT_CAN_msg0xA7_buf2_Raw = fromGateway_frame.buf[2];
-                 PT_CAN_msg0xA7_buf3_Raw = fromGateway_frame.buf[3];
-                 PT_CAN_msg0xA7_buf4_Raw = fromGateway_frame.buf[4];
-                 PT_CAN_msg0xA7_buf5_Raw = fromGateway_frame.buf[5];
-                 PT_CAN_msg0xA7_buf6_Raw = fromGateway_frame.buf[6];
-                 PT_CAN_msg0xA7_buf7_Raw = fromGateway_frame.buf[7];
-
-                 PT_CAN_msg0xA7_FromGateway_buf0 = PT_CAN_msg0xA7_buf0_Raw;
-                 PT_CAN_msg0xA7_FromGateway_buf1 = PT_CAN_msg0xA7_buf1_Raw;
-                 PT_CAN_msg0xA7_FromGateway_buf2 = PT_CAN_msg0xA7_buf2_Raw;
-                 PT_CAN_msg0xA7_FromGateway_buf3 = PT_CAN_msg0xA7_buf3_Raw;
-                 PT_CAN_msg0xA7_FromGateway_buf4 = PT_CAN_msg0xA7_buf4_Raw;
-                 PT_CAN_msg0xA7_FromGateway_buf5 = PT_CAN_msg0xA7_buf5_Raw;
-                 PT_CAN_msg0xA7_FromGateway_buf6 = PT_CAN_msg0xA7_buf6_Raw;
-                 PT_CAN_msg0xA7_FromGateway_buf7 = PT_CAN_msg0xA7_buf7_Raw;
+                 PT_CAN_msg0xA7_FromECU_buf0 = PT_CAN_msg0xA7_buf0_Raw;
+                 PT_CAN_msg0xA7_FromECU_buf1 = PT_CAN_msg0xA7_buf1_Raw;
+                 PT_CAN_msg0xA7_FromECU_buf2 = PT_CAN_msg0xA7_buf2_Raw;
+                 PT_CAN_msg0xA7_FromECU_buf3 = PT_CAN_msg0xA7_buf3_Raw;
+                 PT_CAN_msg0xA7_FromECU_buf4 = PT_CAN_msg0xA7_buf4_Raw;
+                 PT_CAN_msg0xA7_FromECU_buf5 = PT_CAN_msg0xA7_buf5_Raw;
+                 PT_CAN_msg0xA7_FromECU_buf6 = PT_CAN_msg0xA7_buf6_Raw;
+                 PT_CAN_msg0xA7_FromECU_buf7 = PT_CAN_msg0xA7_buf7_Raw;
 
 
                   #pragma endregion
 
 
-                Motor_11_t motor11 = parse_Motor_11(fromGateway_frame);
+                Motor_11_t motor11 = parse_Motor_11(fromECU_frame);
                 MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7 = motor11.MO_EngineTqTargetRaw_0xA7;
                 MQB_Motor_11_0xA7_EngineTqActual_0xA7 = motor11.MO_EngineTqActual_0xA7;
                 MQB_Motor_11_0xA7_EngineTotalMomentsInertia = motor11.MO_EngineTotalMomentsInertia;
@@ -3754,37 +4062,86 @@ void loop_TFTCAN2_poll_MITM_TCU() {
 
 
 
-                motor11_validate(fromGateway_frame.buf);    // <-- add this line
-                motor11_update(fromGateway_frame.buf);          // decode → g_mo11, throttled print
+                motor11_validate(fromECU_frame.buf);    // <-- add this line
+                motor11_update(fromECU_frame.buf);          // decode → g_mo11, throttled print
                 // motor11_print_debug();
 
+              //     Serial.printf(
+              //     "[TqTargetRaw=%d Nm | TqActual=%d Nm | "
+              //     "TotalMI=%d Nm | TqFiltered=%d Nm \n" ,
+              //     g_mo11.EngineTqTargetRaw,
+              //     g_mo11.EngineTqActual,
+              //     g_mo11.EngineTotalMomentsInertia,
+              //     g_mo11.EngineTqTargetFiltered
+
+              // );
+
+
+                // ---- Original data parsed from CAN frames ----
+                motor11_original_EngineTqTargetRaw = g_mo11.EngineTqTargetRaw;
+                motor11_original_EngineTqActual = g_mo11.EngineTqActual;
+                motor11_original_EngineTqTargetFiltered =  g_mo11.EngineTqTargetFiltered;
+
+
+                // ---- MODIFICATIONS (edit g_mo11 fields directly) ----
+                motor11_EngineTqTargetRaw_Modified =  g_mo11.EngineTqTargetRaw * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
+                motor11_EngineTqActual_Modified =  g_mo11.EngineTqActual * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
+                motor11_EngineTqTargetFiltered_Modified =  g_mo11.EngineTqTargetFiltered * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
+
+
+
+
+// if (loopDelaySerialPrint_TCU > 500) {
+                // Serial.print("motor11_original_EngineTqTargetRaw: "); Serial.print(motor11_original_EngineTqTargetRaw); Serial.print("\t");
+                // Serial.print("motor11_original_EngineTqActual: "); Serial.print(motor11_original_EngineTqActual); Serial.print("\t");
+                // Serial.print("motor11_original_EngineTqTargetFiltered: "); Serial.print(motor11_original_EngineTqTargetFiltered); Serial.print("\t");
+                // Serial.print("motor11_EngineTqTargetRaw_Mod: "); Serial.print(motor11_EngineTqTargetRaw_Modified); Serial.print("\t");
+                // Serial.print("motor11_EngineTqActual_Mod: "); Serial.print(motor11_EngineTqActual_Modified); Serial.print("\t");
+                // Serial.print("motor11_EngineTqTargetFiltered_Mod: "); Serial.print(motor11_EngineTqTargetFiltered_Modified); Serial.print("\t");
+                // Serial.println("");
+                // }
+
+          if(MITM_TCU_EngTQ_0xA7_Status_Active_Int == 1) {
+
+                  CAN_message_t fromECU_frame_Modified = fromECU_frame;
+
                   // ---- MODIFICATIONS (edit g_mo11 fields directly) ----
-                  // g_mo11.EngineTqActual        = 150;
-                  // g_mo11.EngineTqTargetRaw     = 150;
-                  // g_mo11.EngineTqTargetFiltered = 150;
+                  g_mo11.EngineTqTargetRaw     = 15;
+                  g_mo11.EngineTqActual        = 15;
+                  g_mo11.EngineTqTargetFiltered = 15;
+
+
+                // g_mo11.EngineTqTargetRaw      = motor11_EngineTqTargetRaw_Modified;
+                // g_mo11.EngineTqActual         = motor11_EngineTqActual_Modified;
+                // g_mo11.EngineTqTargetFiltered = motor11_EngineTqTargetFiltered_Modified;
+
                   // ----------------------------------------------------------
+                // motor11_update(fromECU_frame.buf);          // decode → g_mo11, throttled print
 
 
-                  if(EngineTorqueModification_0xA7_Active == 1) {
+              motor11_encode(fromECU_frame_Modified.buf, g_mo11);
+              //  motor11_update(fromECU_frame_Modified.buf);          // decode → g_mo11, throttled print
 
+              build_frame_with_checksum_0xA7(fromECU_frame_Modified.buf);
 
-                  CAN_message_t fromGateway_frame_Modified = fromGateway_frame;
+              motor11_validate(fromECU_frame_Modified.buf);    // <-- add this line
 
-                  motor11_encode(fromGateway_frame_Modified.buf, g_mo11);
+              // Serial.printf(
+              // "[TqTargetRaw=%d Nm | TqActual=%d Nm | "
+              // "TotalMI=%d Nm | TqFiltered=%d Nm \n" ,
+              // g_mo11.EngineTqTargetRaw,
+              // g_mo11.EngineTqActual,
+              // g_mo11.EngineTotalMomentsInertia,
+              // g_mo11.EngineTqTargetFiltered
+              // );
 
+               TFTCAN2.write(fromECU_frame_Modified);
 
-
-                  build_frame_with_checksum_0xA7(fromGateway_frame_Modified.buf);
-                  TFTCAN3.write(fromGateway_frame_Modified);
-
-                  }
+                }
 
                   else {
-                    TFTCAN3.write(fromGateway_frame); // if no modification, forward unmodified frame to CAN3 (to Gateway/ECU)
+                    TFTCAN2.write(fromECU_frame); // if no modification, forward unmodified frame to CAN3 (to Gateway/ECU)
                   }
-
-
-
 
 
             // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
@@ -3796,70 +4153,94 @@ void loop_TFTCAN2_poll_MITM_TCU() {
                                   
               }
 
-          if (fromGateway_frame.id == 0xA8){ // More Engine Torque Actuals - from ECU
+        if (fromECU_frame.id == 0xA8){ // More Engine Torque Actuals - from ECU
                 // Serial.println("TFTCAN2 recieved");
 
-
-                #pragma region // Motor 12 - CAN bytes Raw
-
+            #pragma region // Motor 12 - CAN bytes Raw
 
 
-                 PT_CAN_msg0xA8_buf0_Raw = fromGateway_frame.buf[0];
-                 PT_CAN_msg0xA8_buf1_Raw = fromGateway_frame.buf[1];
-                 PT_CAN_msg0xA8_buf2_Raw = fromGateway_frame.buf[2];
-                 PT_CAN_msg0xA8_buf3_Raw = fromGateway_frame.buf[3];
-                 PT_CAN_msg0xA8_buf4_Raw = fromGateway_frame.buf[4];
-                 PT_CAN_msg0xA8_buf5_Raw = fromGateway_frame.buf[5];
-                 PT_CAN_msg0xA8_buf6_Raw = fromGateway_frame.buf[6];
-                 PT_CAN_msg0xA8_buf7_Raw = fromGateway_frame.buf[7];
+                 PT_CAN_msg0xA8_buf0_Raw = fromECU_frame.buf[0];
+                 PT_CAN_msg0xA8_buf1_Raw = fromECU_frame.buf[1];
+                 PT_CAN_msg0xA8_buf2_Raw = fromECU_frame.buf[2];
+                 PT_CAN_msg0xA8_buf3_Raw = fromECU_frame.buf[3];
+                 PT_CAN_msg0xA8_buf4_Raw = fromECU_frame.buf[4];
+                 PT_CAN_msg0xA8_buf5_Raw = fromECU_frame.buf[5];
+                 PT_CAN_msg0xA8_buf6_Raw = fromECU_frame.buf[6];
+                 PT_CAN_msg0xA8_buf7_Raw = fromECU_frame.buf[7];
 
-                 PT_CAN_msg0xA8_FromGateway_buf0 = PT_CAN_msg0xA8_buf0_Raw;
-                 PT_CAN_msg0xA8_FromGateway_buf1 = PT_CAN_msg0xA8_buf1_Raw;
-                 PT_CAN_msg0xA8_FromGateway_buf2 = PT_CAN_msg0xA8_buf2_Raw;
-                 PT_CAN_msg0xA8_FromGateway_buf3 = PT_CAN_msg0xA8_buf3_Raw;
-                 PT_CAN_msg0xA8_FromGateway_buf4 = PT_CAN_msg0xA8_buf4_Raw;
-                 PT_CAN_msg0xA8_FromGateway_buf5 = PT_CAN_msg0xA8_buf5_Raw;
-                 PT_CAN_msg0xA8_FromGateway_buf6 = PT_CAN_msg0xA8_buf6_Raw;
-                 PT_CAN_msg0xA8_FromGateway_buf7 = PT_CAN_msg0xA8_buf7_Raw;
+                 PT_CAN_msg0xA8_FromECU_buf0 = PT_CAN_msg0xA8_buf0_Raw;
+                 PT_CAN_msg0xA8_FromECU_buf1 = PT_CAN_msg0xA8_buf1_Raw;
+                 PT_CAN_msg0xA8_FromECU_buf2 = PT_CAN_msg0xA8_buf2_Raw;
+                 PT_CAN_msg0xA8_FromECU_buf3 = PT_CAN_msg0xA8_buf3_Raw;
+                 PT_CAN_msg0xA8_FromECU_buf4 = PT_CAN_msg0xA8_buf4_Raw;
+                 PT_CAN_msg0xA8_FromECU_buf5 = PT_CAN_msg0xA8_buf5_Raw;
+                 PT_CAN_msg0xA8_FromECU_buf6 = PT_CAN_msg0xA8_buf6_Raw;
+                 PT_CAN_msg0xA8_FromECU_buf7 = PT_CAN_msg0xA8_buf7_Raw;
 
 
                   #pragma endregion
 
-
-
-
-
-                motor12_validate(fromGateway_frame.buf);    // <-- add this line
-                motor12_update(fromGateway_frame.buf);          // decode → g_mo12, throttled print
+                motor12_validate(fromECU_frame.buf);    // <-- add this line
+                motor12_update(fromECU_frame.buf);          // decode → g_mo12, throttled print
                 // motor12_print_debug();
 
+
+
+
+                  motor12_original_EngineTq_Neg_Available = g_mo12.EngineTq_Neg_Available;
+                  motor12_original_EngineTqLimit_Stat = g_mo12.EngineTqLimit_Stat;
+                  motor12_original_EngineTqLimit_Dyn = g_mo12.EngineTqLimit_Dyn;
+                  motor12_original_EngineTqPercent = g_mo12.EngineTqPercent;
+                  motor12_original_EngineRPM_raw = g_mo12.EngineRPM_raw;
+                  motor12_original_rpm_physical = (g_mo12.EngineRPM_raw * 0.125) ;
+
                   // ---- MODIFICATIONS (edit g_mo12 fields directly) ----
-                  // g_mo12.EngineTqActual        = 150;
-                  // g_mo12.EngineTqTargetRaw     = 150;
-                  // g_mo12.EngineTqTargetFiltered = 150;
+                  motor12_EngineTq_Neg_Available_Modified = motor12_original_EngineTq_Neg_Available;  
+                  motor12_EngineTqLimit_Stat_Modified = motor12_original_EngineTqLimit_Stat;
+                  motor12_EngineTqLimit_Dyn_Modified = motor12_original_EngineTqLimit_Dyn;
+                  motor12_EngineTqPercent_Modified = motor12_original_EngineTqPercent;
+                  motor12_EngineRPM_raw_Modified = motor12_original_EngineRPM_raw;
+                  motor12_rpm_physical_Modified = motor12_original_rpm_physical;
+
                   // ----------------------------------------------------------
 
 
-                  if(EngineTorqueModification_0xA7_Active == 1) {
+
+            // Serial.print("mo12_ori_EngTq_Neg_Available: "); Serial.print(motor12_original_EngineTq_Neg_Available); Serial.print("\t");
+            // Serial.print("mo12_ori_EngTqLimit_Stat: "); Serial.print(motor12_original_EngineTqLimit_Stat); Serial.print("\t");
+            // Serial.print("mo12_ori_EngTqLimit_Dyn: "); Serial.print(motor12_original_EngineTqLimit_Dyn); Serial.print("\t");
+            // Serial.print("mo12_ori_EngTqPercent: "); Serial.print(motor12_original_EngineTqPercent); Serial.print("\t");
+            // Serial.print("mo12_ori_EngRPM_raw: "); Serial.print(motor12_original_EngineRPM_raw); Serial.print("\t");
+            // Serial.print("mo12_ori_motor12_rpm_physical: "); Serial.print(motor12_original_rpm_physical); Serial.print("\t");
 
 
-                  CAN_message_t fromGateway_frame_Modified = fromGateway_frame;
 
-                  motor12_encode(fromGateway_frame_Modified.buf, g_mo12 );
+            // Serial.print("mo12_EngTq_Neg_Available_Mod: "); Serial.print(motor12_EngineTq_Neg_Available_Modified); Serial.print("\t");
+            // Serial.print("mo12_EngTqLimit_Stat_Mod: "); Serial.print(motor12_EngineTqLimit_Stat_Modified); Serial.print("\t");
+            // Serial.print("mo12_EngTqLimit_Dyn_Mod: "); Serial.print(motor12_EngineTqLimit_Dyn_Modified); Serial.print("\t");
+            // Serial.print("mo12_EngTqPercent_Mod: "); Serial.print(motor12_EngineTqPercent_Modified); Serial.print("\t");
+            // Serial.print("mo12_EngRPM_raw_Mod: "); Serial.print(motor12_EngineRPM_raw_Modified); Serial.print("\t");
+            // Serial.print("motor12_motor12_rpm_physical_Mod: "); Serial.print(motor12_rpm_physical_Modified); Serial.print("\t");
 
 
 
-                  build_frame_with_checksum_0xA7(fromGateway_frame_Modified.buf);
-                  TFTCAN3.write(fromGateway_frame_Modified);
 
-                  }
+
+                if(MITM_TCU_EngTQ_0xA8_Status_Active_Int == 1) {
+
+
+                CAN_message_t fromECU_frame_Modified = fromECU_frame;
+
+                motor12_encode(fromECU_frame_Modified.buf, g_mo12 );
+
+                build_frame_with_checksum_0xA8(fromECU_frame_Modified.buf);
+                TFTCAN2.write(fromECU_frame_Modified);
+
+                }
 
                   else {
-                    TFTCAN3.write(fromGateway_frame); // if no modification, forward unmodified frame to CAN3 (to Gateway/ECU)
+                    TFTCAN2.write(fromECU_frame); // if no modification, forward unmodified frame to CAN3 (to Gateway/ECU)
                   }
-
-
-
 
 
             // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
@@ -3873,478 +4254,204 @@ void loop_TFTCAN2_poll_MITM_TCU() {
 
 
 
-          if (fromGateway_frame.id == 0x785){ // Sniff the desired EngTQ Limit or EngTQ Multiplier, which would originate from the TFT Master Module 
-              // Serial.println("TFTCAN2 recieved");
+
+        if (fromECU_frame.id == 0xB2) {  // ABS - Wheel Speeds 11
+        
+          PT_CAN_msg0xB2_FromECU_buf0 = fromECU_frame.buf[0];
+          PT_CAN_msg0xB2_FromECU_buf1 = fromECU_frame.buf[1];
+          PT_CAN_msg0xB2_FromECU_buf2 = fromECU_frame.buf[2];
+          PT_CAN_msg0xB2_FromECU_buf3 = fromECU_frame.buf[3];
+          PT_CAN_msg0xB2_FromECU_buf4 = fromECU_frame.buf[4];
+          PT_CAN_msg0xB2_FromECU_buf5 = fromECU_frame.buf[5];
+          PT_CAN_msg0xB2_FromECU_buf6 = fromECU_frame.buf[6];
+          PT_CAN_msg0xB2_FromECU_buf7 = fromECU_frame.buf[7];  
 
 
-                 PT_CAN_msg0x785_buf0_Raw = fromGateway_frame.buf[0];
-                 PT_CAN_msg0x785_buf1_Raw = fromGateway_frame.buf[1];
-                 PT_CAN_msg0x785_buf2_Raw = fromGateway_frame.buf[2];
-                 PT_CAN_msg0x785_buf3_Raw = fromGateway_frame.buf[3];
-                 PT_CAN_msg0x785_buf4_Raw = fromGateway_frame.buf[4];
-                 PT_CAN_msg0x785_buf5_Raw = fromGateway_frame.buf[5];
-                 PT_CAN_msg0x785_buf6_Raw = fromGateway_frame.buf[6];
-                 PT_CAN_msg0x785_buf7_Raw = fromGateway_frame.buf[7];
+      #pragma region // Calculate Individual Wheel Speeds in km/h based on VAG CAN sniffing
 
-                 PT_CAN_msg0x785_FromGateway_buf0 = PT_CAN_msg0x785_buf0_Raw;
-                 PT_CAN_msg0x785_FromGateway_buf1 = PT_CAN_msg0x785_buf1_Raw;
-                 PT_CAN_msg0x785_FromGateway_buf2 = PT_CAN_msg0x785_buf2_Raw;
-                 PT_CAN_msg0x785_FromGateway_buf3 = PT_CAN_msg0x785_buf3_Raw;
-                 PT_CAN_msg0x785_FromGateway_buf4 = PT_CAN_msg0x785_buf4_Raw;
-                 PT_CAN_msg0x785_FromGateway_buf5 = PT_CAN_msg0x785_buf5_Raw;
-                 PT_CAN_msg0x785_FromGateway_buf6 = PT_CAN_msg0x785_buf6_Raw;
-                 PT_CAN_msg0x785_FromGateway_buf7 = PT_CAN_msg0x785_buf7_Raw;
+        word WhlSpdFL_Raw_CAN = (PT_CAN_msg0xB2_FromECU_buf4 + (PT_CAN_msg0xB2_FromECU_buf5 * 256));
+        WhlSpdFL_Raw = WhlSpdFL_Raw_CAN;
+        WhlSpdFL = (WhlSpdFL_Raw * 0.0075);
+        WhlSpdFL_Float = (WhlSpdFL_Raw * 0.0075);
 
+        word WhlSpdFR_Raw_CAN = (PT_CAN_msg0xB2_FromECU_buf6 + (PT_CAN_msg0xB2_FromECU_buf7 * 256));
+        WhlSpdFR_Raw = WhlSpdFR_Raw_CAN;
+        WhlSpdFR = (WhlSpdFR_Raw* 0.0075);
+        WhlSpdFR_Float = (WhlSpdFR_Raw* 0.0075);
 
-                 if(PT_CAN_msg0x785_buf0_Raw == 0x1) {
+        word WhlSpdRL_Raw_CAN = (PT_CAN_msg0xB2_FromECU_buf0 + (PT_CAN_msg0xB2_FromECU_buf1 * 256));
+        WhlSpdRL_Raw = WhlSpdRL_Raw_CAN;
+        WhlSpdRL = (WhlSpdRL_Raw * 0.0075);
+        WhlSpdRL_Float = (WhlSpdRL_Raw * 0.0075);
 
-                    MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromGateway_buf1);
-                    MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromGateway_buf2);
-                    MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
-
-                  }
-
-                  MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = 90; // for testing
-                  MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0; // temporary testing
-
-                  MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = 22; // for testing - this would be multiplied by 10 to arrive at 220Nm torque limit. 
-                                  
-            }
-
-            
+        word WhlSpdRR_Raw_CAN = (PT_CAN_msg0xB2_FromECU_buf2 + (PT_CAN_msg0xB2_FromECU_buf3 * 256));
+        WhlSpdRR_Raw = WhlSpdRR_Raw_CAN;
+        WhlSpdRR = (WhlSpdRR_Raw * 0.0075);
+        WhlSpdRR_Float = (WhlSpdRR_Raw * 0.0075);
 
 
+      //  Serial.print("WhlSpdFL: "); Serial.print(WhlSpdFL); Serial.println();
+      //  Serial.print("WhlSpdFR: "); Serial.print(WhlSpdFR); Serial.println();
+      //  Serial.print("WhlSpdRL: "); Serial.print(WhlSpdRL); Serial.println();
+      //  Serial.print("WhlSpdRR: "); Serial.print(WhlSpdRR); Serial.println();
 
 
-  }
+        #pragma endregion
 
+      #pragma region // Calculate Axle Averages and Slip Rates
 
+          WhlSpdAvg_Float = (WhlSpdFL_Float + WhlSpdFR_Float + WhlSpdRL_Float + WhlSpdRR_Float) / 4.0;
+          WhlSpd_FrontAxleAvg_Float = (WhlSpdFL_Float + WhlSpdFR_Float) / 2.0;
+          WhlSpd_RearAxleAvg_Float =  (WhlSpdRL_Float + WhlSpdRR_Float) / 2.0;
 
-  
-}
+          if(WhlSpdAvg_Float == 0.0) {
+            TimeSinceWhlSpd0 = 0;
+          }
 
-  // Poll TFTCAN3 // Standard PT_CAN Sniffing
-void loop_TFTCAN3_poll_MITM_TCU() {
-  CAN_message_t PT_CAN_frame;
-  CAN_message_t PT_CAN_frame_mod;
+          if(WhlSpdFL_Float > 0) { // Calculate Slip Ratios per axle and overall. 
+              // Front Axle Slip Multiplier
+              if(WhlSpdFL_Float > WhlSpdFR_Float) {
+              WhlSpd_FrontAxleSlipKmh_Float = WhlSpdFL_Float - WhlSpdFR_Float;
+              WhlSpd_FrontAxleSlipPct_Float = WhlSpdFL_Float / WhlSpdFR_Float;
+              // (WhlSpd_FrontAxleSlipPct_Float = WhlSpdFL_Float / WhlSpdFR_Float) - 1.0;
+              }
+                else if(WhlSpdFL_Float > WhlSpdFR_Float) {
+                WhlSpd_FrontAxleSlipKmh_Float = WhlSpdFR_Float - WhlSpdFL_Float;
+                WhlSpd_FrontAxleSlipPct_Float = WhlSpdFR_Float / WhlSpdFL_Float;
+              //  (WhlSpd_FrontAxleSlipPct_Float = WhlSpdFR_Float / WhlSpdFL_Float) - 1.0;
+                }
 
-    // Simple PT_CAN Sniffing for now
-    while (TFTCAN3.read(PT_CAN_frame)) {
- 
-// Serial.println("tftcan3 recieved");
+              // Rear Axle Slip Multiplier
+              if(WhlSpdRL_Float > WhlSpdRR_Float) {
+              WhlSpd_RearAxleSlipKmh_Float = WhlSpdRL_Float - WhlSpdRR_Float;
+              WhlSpd_RearAxleSlipPct_Float = WhlSpdRL_Float / WhlSpdRR_Float;
+              // (WhlSpd_RearAxleSlipPct_Float = WhlSpdRL_Float / WhlSpdRR_Float) - 1.0;
+              }
+                else if(WhlSpdRL_Float > WhlSpdRR_Float) {
+                WhlSpd_RearAxleSlipKmh_Float = WhlSpdRR_Float - WhlSpdRL_Float;
+                WhlSpd_RearAxleSlipPct_Float = WhlSpdRR_Float / WhlSpdRL_Float;
+                // (WhlSpd_RearAxleSlipPct_Float = WhlSpdRR_Float / WhlSpdRL_Float) - 1.0;
+                }
 
-          if (PT_CAN_frame.id == 0x40) { // Airbag Module - Used for Ign On status
-          // printFrame(PT_CAN_frame, 3);                                  //uncomment line to print frames received on TFTCAN2
-// Serial.println("tftcan3 recieved");
-
-                PT_CAN_msg0x40_buf0_Raw = PT_CAN_frame.buf[0];
-                PT_CAN_msg0x40_buf1_Raw = PT_CAN_frame.buf[1];
-                PT_CAN_msg0x40_buf2_Raw = PT_CAN_frame.buf[2];
-                PT_CAN_msg0x40_buf3_Raw = PT_CAN_frame.buf[3];
-                PT_CAN_msg0x40_buf4_Raw = PT_CAN_frame.buf[4];
-                PT_CAN_msg0x40_buf5_Raw = PT_CAN_frame.buf[5];
-                PT_CAN_msg0x40_buf6_Raw = PT_CAN_frame.buf[6];
-                PT_CAN_msg0x40_buf7_Raw = PT_CAN_frame.buf[7];  
-
-                PT_CAN_msg0x40_buf0 = PT_CAN_msg0x40_buf0_Raw;
-                PT_CAN_msg0x40_buf1 = PT_CAN_msg0x40_buf1_Raw;
-                PT_CAN_msg0x40_buf2 = PT_CAN_msg0x40_buf2_Raw;
-                PT_CAN_msg0x40_buf3 = PT_CAN_msg0x40_buf3_Raw;
-                PT_CAN_msg0x40_buf4 = PT_CAN_msg0x40_buf4_Raw;
-                PT_CAN_msg0x40_buf5 = PT_CAN_msg0x40_buf5_Raw;
-                PT_CAN_msg0x40_buf6 = PT_CAN_msg0x40_buf6_Raw;
-                PT_CAN_msg0x40_buf7 = PT_CAN_msg0x40_buf7_Raw;  
-
-
-
-
-              // IgnitionStatusTimerCAN(PT_CAN_frame.buf[1]);
-              IgnitionStatusTimerCAN = (PT_CAN_msg0x40_buf1_Raw);
-              IgnitionStatusTimer = IgnitionStatusTimerCAN;
-
-              IgnitionStatusTimer_TimeSinceLastMessage = 0;
-
-              digitalToggle(LED_PIN_CANRecieve);
-
-
-
-
+              // Center or Front/Rear Slip Multiplier
+              if(WhlSpd_FrontAxleAvg_Float > WhlSpd_RearAxleAvg_Float) {
+              WhlSpd_CenterSlipKmh_Float = WhlSpd_FrontAxleAvg_Float - WhlSpd_RearAxleAvg_Float;
+              WhlSpd_CenterSlipPct_Float = WhlSpd_FrontAxleAvg_Float / WhlSpd_RearAxleAvg_Float;
+              // (WhlSpd_CenterSlipPct_Float = WhlSpd_FrontAxleAvg_Float / WhlSpd_RearAxleAvg_Float) - 1.0;
+              }
+                else if(WhlSpd_FrontAxleAvg_Float > WhlSpd_RearAxleAvg_Float) {
+                WhlSpd_CenterSlipKmh_Float = WhlSpd_RearAxleAvg_Float - WhlSpd_FrontAxleAvg_Float;
+                WhlSpd_CenterSlipPct_Float = WhlSpd_RearAxleAvg_Float / WhlSpd_FrontAxleAvg_Float;
+                // (WhlSpd_CenterSlipPct_Float = WhlSpd_RearAxleAvg_Float / WhlSpd_FrontAxleAvg_Float) - 1.0;
+                }
 
               }
 
+          else {
+
+          WhlSpd_FrontAxleSlipKmh_Float = 1.0 ;
+          WhlSpd_FrontAxleSlipPct_Float = 1.0 ;
+
+          WhlSpd_RearAxleSlipKmh_Float = 1.0 ;
+          WhlSpd_RearAxleSlipPct_Float = 1.0 ;
+
+          WhlSpd_CenterSlipKmh_Float = 1.0 ;
+          WhlSpd_CenterSlipPct_Float = 1.0 ;
 
 
-
-        if (fromGateway_frame.id == 0x120) {  // 0x120 / 288 - TSK_06 - Operational Statuses and Cruise Control on/off
-                //  printFrame(fromGateway_frame, 3);  // 3 - Printing Raw Messages received on Can3
-                // digitalToggle(52);
-
-            #pragma region // 
-
-              TSK_06_t tsk06 = parse_TSK_06(fromGateway_frame);
-
-              MQB_TSK_0x120_MainSwitch_CruiseControl_ONOFF = tsk06.TSK_MainSwitch_CruiseControl_ONOFF;
-
-              PT_CAN_msg0x120_buf0_Raw = fromGateway_frame.buf[0];
-              PT_CAN_msg0x120_buf1_Raw = fromGateway_frame.buf[1];
-              PT_CAN_msg0x120_buf2_Raw = fromGateway_frame.buf[2];
-              PT_CAN_msg0x120_buf3_Raw = fromGateway_frame.buf[3];
-              PT_CAN_msg0x120_buf4_Raw = fromGateway_frame.buf[4];
-              PT_CAN_msg0x120_buf5_Raw = fromGateway_frame.buf[5];
-              PT_CAN_msg0x120_buf6_Raw = fromGateway_frame.buf[6];
-              PT_CAN_msg0x120_buf7_Raw = fromGateway_frame.buf[7];  
-
-              PT_CAN_msg0x120_buf0 = PT_CAN_msg0x120_buf0_Raw;
-              PT_CAN_msg0x120_buf1 = PT_CAN_msg0x120_buf1_Raw;
-              PT_CAN_msg0x120_buf2 = PT_CAN_msg0x120_buf2_Raw;
-              PT_CAN_msg0x120_buf3 = PT_CAN_msg0x120_buf3_Raw;
-              PT_CAN_msg0x120_buf4 = PT_CAN_msg0x120_buf4_Raw;
-              PT_CAN_msg0x120_buf5 = PT_CAN_msg0x120_buf5_Raw;
-              PT_CAN_msg0x120_buf6 = PT_CAN_msg0x120_buf6_Raw;
-              PT_CAN_msg0x120_buf7 = PT_CAN_msg0x120_buf7_Raw;
-
-
-            // Serial.print("MQB_TSK_0x120_MainSwitch_CruiseControl_ONOFF: "); Serial.print(MQB_TSK_0x120_MainSwitch_CruiseControl_ONOFF); Serial.print("\t");
-            // Serial.println("");
-
-                  
+          }
           #pragma endregion
 
-          
-       }
-
-        if (fromGateway_frame.id == 0x121){ // Motor_20 - general engine operations
-              //  printFrame(fromGateway_frame, 3);  // 3 - Printing Raw Messages received
-            // Serial.println("tftcan3 recieved");
 
 
-              Motor_20_t motor20 = parse_Motor_20(fromGateway_frame);
-
-              MQB_MO_20_0x121_AccelPedalRaw_01 = motor20.MO_AccelPedalRaw_01;
-              MQB_MO_20_0x121_rel_IntakeManifoldPressure = motor20.MO_rel_IntakeManifoldPressure;
-              MQB_MO_20_0x121_Decoupling_TargetSlip = motor20.MO_Decoupling_TargetSlip;
-
-
-
-              PT_CAN_msg0x121_buf0_Raw = fromGateway_frame.buf[0];
-              PT_CAN_msg0x121_buf1_Raw = fromGateway_frame.buf[1];
-              PT_CAN_msg0x121_buf2_Raw = fromGateway_frame.buf[2];
-              PT_CAN_msg0x121_buf3_Raw = fromGateway_frame.buf[3];
-              PT_CAN_msg0x121_buf4_Raw = fromGateway_frame.buf[4];
-              PT_CAN_msg0x121_buf5_Raw = fromGateway_frame.buf[5];
-              PT_CAN_msg0x121_buf6_Raw = fromGateway_frame.buf[6];
-              PT_CAN_msg0x121_buf7_Raw = fromGateway_frame.buf[7];
-
-              PT_CAN_msg0x121_buf0 = PT_CAN_msg0x121_buf0_Raw;
-              PT_CAN_msg0x121_buf1 = PT_CAN_msg0x121_buf1_Raw;
-              PT_CAN_msg0x121_buf2 = PT_CAN_msg0x121_buf2_Raw;
-              PT_CAN_msg0x121_buf3 = PT_CAN_msg0x121_buf3_Raw;
-              PT_CAN_msg0x121_buf4 = PT_CAN_msg0x121_buf4_Raw;
-              PT_CAN_msg0x121_buf5 = PT_CAN_msg0x121_buf5_Raw;
-              PT_CAN_msg0x121_buf6 = PT_CAN_msg0x121_buf6_Raw;
-              PT_CAN_msg0x121_buf7 = PT_CAN_msg0x121_buf7_Raw;
-
-
-                                  
-            }
-
-        if (fromGateway_frame.id == 0x12B) {  // GRA_Acc_01 - CruiseControl Stalk/Buttons
-                //  printFrame(fromGateway_frame, 3);  // 3 - Printing Raw Messages received on Can3
-                // digitalToggle(52);
-
-            #pragma region // 
-
-              GRA_ACC_01_t cruise01 = parse_GRA_ACC_01(fromGateway_frame);
-
-              MQB_GRA_0x12B_CruiseControl_MainSwitch = cruise01.GRA_CruiseControl_MainSwitch;
-              MQB_GRA_0x12B_CruiseControl_Cancel  = cruise01.GRA_CruiseControl_Cancel;
-              MQB_GRA_0x12B_CruiseControl_RES = cruise01.GRA_CruiseControl_RES ;
-              MQB_GRA_0x12B_CruiseControl_UP = cruise01.GRA_CruiseControl_UP ;
-              MQB_GRA_0x12B_CruiseControl_DOWN = cruise01.GRA_CruiseControl_DOWN ;
-              MQB_GRA_0x12B_CruiseControl_SET = cruise01.GRA_CruiseControl_SET;
-              MQB_GRA_0x12B_CruiseControl_Limiter = cruise01.GRA_CruiseControl_Limiter ;
-              MQB_GRA_0x12B_CruiseControl_Typ_MainSwitch = cruise01.GRA_CruiseControl_Typ_MainSwitch ;
-              MQB_GRA_0x12B_CruiseControl_AdjustmentTimeGap = cruise01.GRA_CruiseControl_AdjustmentTimeGap;
- 
-              PT_CAN_msg0x12B_buf0_Raw = fromGateway_frame.buf[0];
-              PT_CAN_msg0x12B_buf1_Raw = fromGateway_frame.buf[1];
-              PT_CAN_msg0x12B_buf2_Raw = fromGateway_frame.buf[2];
-              PT_CAN_msg0x12B_buf3_Raw = fromGateway_frame.buf[3];
-              PT_CAN_msg0x12B_buf4_Raw = fromGateway_frame.buf[4];
-              PT_CAN_msg0x12B_buf5_Raw = fromGateway_frame.buf[5];
-              PT_CAN_msg0x12B_buf6_Raw = fromGateway_frame.buf[6];
-              PT_CAN_msg0x12B_buf7_Raw = fromGateway_frame.buf[7];  
-
-
-              PT_CAN_msg0x12B_buf0 = PT_CAN_msg0x12B_buf0_Raw;
-              PT_CAN_msg0x12B_buf1 = PT_CAN_msg0x12B_buf1_Raw;
-              PT_CAN_msg0x12B_buf2 = PT_CAN_msg0x12B_buf2_Raw;
-              PT_CAN_msg0x12B_buf3 = PT_CAN_msg0x12B_buf3_Raw;
-              PT_CAN_msg0x12B_buf4 = PT_CAN_msg0x12B_buf4_Raw;
-              PT_CAN_msg0x12B_buf5 = PT_CAN_msg0x12B_buf5_Raw;
-              PT_CAN_msg0x12B_buf6 = PT_CAN_msg0x12B_buf6_Raw;
-              PT_CAN_msg0x12B_buf7 = PT_CAN_msg0x12B_buf7_Raw;
-
-                cruiseStalk_byte1CAN = PT_CAN_msg0x12B_buf1_Raw;
-                cruiseStalk_byte1 = cruiseStalk_byte1CAN;
-
-                cruiseStalkCAN = PT_CAN_msg0x12B_buf2_Raw;
-                cruiseStalk = cruiseStalkCAN;
-
-
-            // Serial.print("MQB_MO4_0x107_DisplayedRPM: "); Serial.print(MQB_MO4_0x107_DisplayedRPM); Serial.print("\t");
-            // Serial.print("MQB_MO4_0x107_TargetGear: "); Serial.print(MQB_MO4_0x107_TargetGear); Serial.print("\t");
-            // Serial.println("");
-
-                  
-          #pragma endregion
-
-          
-       }
-
-
-
-
-
-
-              if (PT_CAN_frame.id == 0x391){ // Torque Demand/TPS/Accel Pedal 
-
-    //  Serial.print("MB "); Serial.print(PT_CAN_msg0x391.mb);
-    //  Serial.print(" ID: "); Serial.print(PT_CAN_msg0x391.id, HEX);
-    //  Serial.print(" Buffer: ");
-    for (uint8_t i = 0; i < PT_CAN_frame.len; i++)
-    {
-        //  Serial.print(PT_CAN_msg0x391.buf[i], HEX); Serial.print(" ");
-    }
-          // Serial.println("  ");
-
-
-
-
-
-                PT_CAN_msg0x391_buf0_Raw = PT_CAN_frame.buf[0];
-                PT_CAN_msg0x391_buf1_Raw = PT_CAN_frame.buf[1];
-                PT_CAN_msg0x391_buf2_Raw = PT_CAN_frame.buf[2];
-                PT_CAN_msg0x391_buf3_Raw = PT_CAN_frame.buf[3];
-                PT_CAN_msg0x391_buf4_Raw = PT_CAN_frame.buf[4];
-                PT_CAN_msg0x391_buf5_Raw = PT_CAN_frame.buf[5];
-                PT_CAN_msg0x391_buf6_Raw = PT_CAN_frame.buf[6];
-                PT_CAN_msg0x391_buf7_Raw = PT_CAN_frame.buf[7];  
-
-                PT_CAN_msg0x391_buf0 = PT_CAN_msg0x391_buf0_Raw;
-                PT_CAN_msg0x391_buf1 = PT_CAN_msg0x391_buf1_Raw;
-                PT_CAN_msg0x391_buf2 = PT_CAN_msg0x391_buf2_Raw;
-                PT_CAN_msg0x391_buf3 = PT_CAN_msg0x391_buf3_Raw;
-                PT_CAN_msg0x391_buf4 = PT_CAN_msg0x391_buf4_Raw;
-                PT_CAN_msg0x391_buf5 = PT_CAN_msg0x391_buf5_Raw;
-                PT_CAN_msg0x391_buf6 = PT_CAN_msg0x391_buf6_Raw;
-                PT_CAN_msg0x391_buf7 = PT_CAN_msg0x391_buf7_Raw;  
-
-
-
-              ThrottleTPS_0x391_PTCAN_CAN = PT_CAN_msg0x391_buf2;
-              ThrottleTPS_0x391_PT_CAN_Float = (ThrottleTPS_0x391_PTCAN_CAN * 0.39215686275 ) ;
-
-              ThrottleTPS_0x391_PT_CAN_Mapped_Float = map(ThrottleTPS_0x391_PT_CAN_Float,10,85,0,100);
-              ThrottleTPS_0x391_PT_CAN_Mapped_Int = ThrottleTPS_0x391_PT_CAN_Mapped_Float;
-              ThrottleTPS_0x391_PT_CAN_Mapped_Int = constrain(ThrottleTPS_0x391_PT_CAN_Mapped_Int,0,100);
-              ThrottleTPS_0x391_PT_CAN_Mapped_Int = ThrottleTPS_0x391_PT_CAN_Mapped_Int;
-
-
-              AccelPedal_0x391_PT_CAN = PT_CAN_msg0x391_buf5;
-              AccelPedal_0x391_PT_CAN_Float = (AccelPedal_0x391_PT_CAN * 0.39215686275 ) ;
-
-              AccelPedal_0x391_PT_CAN_Mapped_Float = map(AccelPedal_0x391_PT_CAN_Float,15,80,0,100);
-              AccelPedal_0x391_PT_CAN_Mapped_Int = AccelPedal_0x391_PT_CAN_Mapped_Float;
-              AccelPedal_0x391_PT_CAN_Mapped_Int = constrain(AccelPedal_0x391_PT_CAN_Mapped_Int,0,100);
-
-            // Serial.print("ThrottleTPS_0x391_PT_CAN_Float: ");
-            // Serial.print(ThrottleTPS_0x391_PT_CAN_Float); Serial.print(" ");
-            // Serial.print("AccelPedal_0x391_PT_CAN_Mapped_Float: ");
-            // Serial.println(AccelPedal_0x391_PT_CAN_Mapped_Float);  Serial.print(" ");
-            // Serial.println();
-
-            // Serial.println();
-                
-            }
-
-          if (PT_CAN_frame.id == 0x3DD){ // paddles
-// Serial.println("tftcan3 recieved");
-
-
-                 PT_CAN_msg0x3DD_buf0_Raw = PT_CAN_frame.buf[0];
-                 PT_CAN_msg0x3DD_buf1_Raw = PT_CAN_frame.buf[1];
-                 PT_CAN_msg0x3DD_buf2_Raw = PT_CAN_frame.buf[2];
-                 PT_CAN_msg0x3DD_buf3_Raw = PT_CAN_frame.buf[3];
-                 PT_CAN_msg0x3DD_buf4_Raw = PT_CAN_frame.buf[4];
-                 PT_CAN_msg0x3DD_buf5_Raw = PT_CAN_frame.buf[5];
-                 PT_CAN_msg0x3DD_buf6_Raw = PT_CAN_frame.buf[6];
-                 PT_CAN_msg0x3DD_buf7_Raw = PT_CAN_frame.buf[7];
-
-                 PT_CAN_msg0x3DD_buf0 = PT_CAN_msg0x3DD_buf0_Raw;
-                 PT_CAN_msg0x3DD_buf1 = PT_CAN_msg0x3DD_buf1_Raw;
-                 PT_CAN_msg0x3DD_buf2 = PT_CAN_msg0x3DD_buf2_Raw;
-                 PT_CAN_msg0x3DD_buf3 = PT_CAN_msg0x3DD_buf3_Raw;
-                 PT_CAN_msg0x3DD_buf4 = PT_CAN_msg0x3DD_buf4_Raw;
-                 PT_CAN_msg0x3DD_buf5 = PT_CAN_msg0x3DD_buf5_Raw;
-                 PT_CAN_msg0x3DD_buf6 = PT_CAN_msg0x3DD_buf6_Raw;
-                 PT_CAN_msg0x3DD_buf7 = PT_CAN_msg0x3DD_buf7_Raw;
-
-
-
-                      word PaddlePositionsCAN = PT_CAN_msg0x3DD_buf7;
-                      PaddlePositions = PaddlePositionsCAN;
-
-      if(PaddlePositions == 0x00)
-        {
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 0;
         }
 
-      if(PaddlePositions == 0x01)
-        {
-        Paddle_DOWN_Pulled = 1;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 0;
-        }
-
-      if(PaddlePositions == 0x02)
-        {
-        
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 1;
-        BOTH_Paddles_Pulled = 0;
-        }
-
-      if(PaddlePositions == 0x03)
-        {
-        Paddle_DOWN_Pulled = 0;
-        Paddle_UP_Pulled = 0;
-        BOTH_Paddles_Pulled = 1;
-        }
-
-                                  
-            }
-
-         
+// Forward all handled frames that weren't already forwarded above (0xA7/0xA8 handle their own)
+        if (fromECU_frame.id != 0xA7 && fromECU_frame.id != 0xA8) {
+            TFTCAN2.write(fromECU_frame);
+          }
 
 
-          if (PT_CAN_frame.id == 0xA7){ // Engine Torque Actuals - from ECU
+// Sniff non-OEM frames that don't need to be sent to the TCU
+
+        if (fromECU_frame.id == 0x785){ // Sniff the desired EngTQ Limit or EngTQ Multiplier, which would originate from the TFT Master Module 
                 // Serial.println("tftcan3 recieved");
 
 
-                Motor_11_t motor11 = parse_Motor_11(PT_CAN_frame);
-                MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7 = motor11.MO_EngineTqTargetRaw_0xA7;
-                MQB_Motor_11_0xA7_EngineTqActual_0xA7 = motor11.MO_EngineTqActual_0xA7;
-                MQB_Motor_11_0xA7_EngineTotalMomentsInertia = motor11.MO_EngineTotalMomentsInertia;
-                MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7 = motor11.MO_EngineTqTargetFiltered_0xA7;
-                MQB_Motor_11_0xA7_EngineTqThrust = motor11.MO_EngineTqThrust;
-                MQB_Motor_11_0xA7_Status_NormalOperation_01 = motor11.MO_Status_NormalOperation_01;
-                MQB_Motor_11_0xA7_First_ImprecisionThreshold = motor11.MO_First_ImprecisionThreshold;
-                MQB_Motor_11_0xA7_QBit_EngineTq = motor11.MO_QBit_EngineTq;
+                  PT_CAN_msg0x785_buf0_Raw = fromECU_frame.buf[0];
+                  PT_CAN_msg0x785_buf1_Raw = fromECU_frame.buf[1];
+                  PT_CAN_msg0x785_buf2_Raw = fromECU_frame.buf[2];
+                  PT_CAN_msg0x785_buf3_Raw = fromECU_frame.buf[3];
+                  PT_CAN_msg0x785_buf4_Raw = fromECU_frame.buf[4];
+                  PT_CAN_msg0x785_buf5_Raw = fromECU_frame.buf[5];
+                  PT_CAN_msg0x785_buf6_Raw = fromECU_frame.buf[6];
+                  PT_CAN_msg0x785_buf7_Raw = fromECU_frame.buf[7];
+
+                  PT_CAN_msg0x785_FromECU_buf0 = PT_CAN_msg0x785_buf0_Raw;
+                  PT_CAN_msg0x785_FromECU_buf1 = PT_CAN_msg0x785_buf1_Raw;
+                  PT_CAN_msg0x785_FromECU_buf2 = PT_CAN_msg0x785_buf2_Raw;
+                  PT_CAN_msg0x785_FromECU_buf3 = PT_CAN_msg0x785_buf3_Raw;
+                  PT_CAN_msg0x785_FromECU_buf4 = PT_CAN_msg0x785_buf4_Raw;
+                  PT_CAN_msg0x785_FromECU_buf5 = PT_CAN_msg0x785_buf5_Raw;
+                  PT_CAN_msg0x785_FromECU_buf6 = PT_CAN_msg0x785_buf6_Raw;
+                  PT_CAN_msg0x785_FromECU_buf7 = PT_CAN_msg0x785_buf7_Raw;
 
 
+                  if(PT_CAN_msg0x785_buf0_Raw == 0x1) {
 
-                 PT_CAN_msg0xA7_buf0_Raw = PT_CAN_frame.buf[0];
-                 PT_CAN_msg0xA7_buf1_Raw = PT_CAN_frame.buf[1];
-                 PT_CAN_msg0xA7_buf2_Raw = PT_CAN_frame.buf[2];
-                 PT_CAN_msg0xA7_buf3_Raw = PT_CAN_frame.buf[3];
-                 PT_CAN_msg0xA7_buf4_Raw = PT_CAN_frame.buf[4];
-                 PT_CAN_msg0xA7_buf5_Raw = PT_CAN_frame.buf[5];
-                 PT_CAN_msg0xA7_buf6_Raw = PT_CAN_frame.buf[6];
-                 PT_CAN_msg0xA7_buf7_Raw = PT_CAN_frame.buf[7];
+                      MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromECU_buf1);
+                      MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromECU_buf2);
+                      MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
 
-                 PT_CAN_msg0xA7_buf0 = PT_CAN_msg0xA7_buf0_Raw;
-                 PT_CAN_msg0xA7_buf1 = PT_CAN_msg0xA7_buf1_Raw;
-                 PT_CAN_msg0xA7_buf2 = PT_CAN_msg0xA7_buf2_Raw;
-                 PT_CAN_msg0xA7_buf3 = PT_CAN_msg0xA7_buf3_Raw;
-                 PT_CAN_msg0xA7_buf4 = PT_CAN_msg0xA7_buf4_Raw;
-                 PT_CAN_msg0xA7_buf5 = PT_CAN_msg0xA7_buf5_Raw;
-                 PT_CAN_msg0xA7_buf6 = PT_CAN_msg0xA7_buf6_Raw;
-                 PT_CAN_msg0xA7_buf7 = PT_CAN_msg0xA7_buf7_Raw;
+                    }
 
+                    MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = 90; // for testing
+                    MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0; // temporary testing
 
-            // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
-            // Serial.print("MQB_Motor_11_0xA7_Status_NormalOperation_01: "); Serial.print(MQB_Motor_11_0xA7_Status_NormalOperation_01); Serial.print("\t");
-            // Serial.println("");
+                    MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = 22; // for testing - this would be multiplied by 10 to arrive at 220Nm torque limit.
 
-
-
-                                  
               }
 
 
 
-          if (PT_CAN_frame.id == 0x785){ // Sniff the desired EngTQ Limit or EngTQ Multiplier, which would originate from the TFT Master Module 
-              // Serial.println("tftcan3 recieved");
+      } // end while
 
+  } 
 
-                 PT_CAN_msg0x785_buf0_Raw = PT_CAN_frame.buf[0];
-                 PT_CAN_msg0x785_buf1_Raw = PT_CAN_frame.buf[1];
-                 PT_CAN_msg0x785_buf2_Raw = PT_CAN_frame.buf[2];
-                 PT_CAN_msg0x785_buf3_Raw = PT_CAN_frame.buf[3];
-                 PT_CAN_msg0x785_buf4_Raw = PT_CAN_frame.buf[4];
-                 PT_CAN_msg0x785_buf5_Raw = PT_CAN_frame.buf[5];
-                 PT_CAN_msg0x785_buf6_Raw = PT_CAN_frame.buf[6];
-                 PT_CAN_msg0x785_buf7_Raw = PT_CAN_frame.buf[7];
-
-                 PT_CAN_msg0x785_buf0 = PT_CAN_msg0x785_buf0_Raw;
-                 PT_CAN_msg0x785_buf1 = PT_CAN_msg0x785_buf1_Raw;
-                 PT_CAN_msg0x785_buf2 = PT_CAN_msg0x785_buf2_Raw;
-                 PT_CAN_msg0x785_buf3 = PT_CAN_msg0x785_buf3_Raw;
-                 PT_CAN_msg0x785_buf4 = PT_CAN_msg0x785_buf4_Raw;
-                 PT_CAN_msg0x785_buf5 = PT_CAN_msg0x785_buf5_Raw;
-                 PT_CAN_msg0x785_buf6 = PT_CAN_msg0x785_buf6_Raw;
-                 PT_CAN_msg0x785_buf7 = PT_CAN_msg0x785_buf7_Raw;
-
-
-                 if(PT_CAN_msg0x785_buf0_Raw == 0x1) {
-
-                    MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_buf1);
-                    MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_buf2);
-                    MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
-
-                  }
-
-                  MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = 90; // for testing
-                  MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0; // temporary testing
-
-                  MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = 22; // for testing - this would be multiplied by 10 to arrive at 220Nm torque limit. 
-                                  
-            }
-
-            
-
-
-
-
-  }
-
-
-  
-}
 
 
 void do_TFT_MITM_TCU_EngTQmod() {
 
-        if(GearLeverPosition_TIP == 1) { // Initial Determination of "Acceptable Conditions" for EngTqModification
+
+        MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit = 100; // 
+        MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float = MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit / 100.0; // this is the final multiplier value that will be applied to the EngTq from 0xA7
+
+
+
+        // if(GearLeverPosition_TIP == 1 ) { // Initial Determination of "Acceptable Conditions" for EngTqModification
+        if(CruiseStalk_DistanceDOWN_bit == 1 ) { // Initial Determination of "Acceptable Conditions" for EngTqModification
               MITM_EngTQmod_AcceptableConditions = 1;
+              MITM_EngTQmod_ActivationButton = 1;
+              MITM_TCU_EngTQ_0xA7_Status_Active_Int = 1;
+
           }
           else {
                 MITM_EngTQmod_AcceptableConditions = 0;
+                  MITM_EngTQmod_ActivationButton = 0;
+                  MITM_TCU_EngTQ_0xA7_Status_Active_Int = 0;
+
             }
 
 
-      // Determine whether to actually activate the MITM EngTQmod 
-          if(( CruiseStalk_OFF_FromPT_CAN == 1 && MITM_EngTQmod_AcceptableConditions )   ) { // 
-              MITM_EngTQmod_ActivationButton = 1;
-              TFT_MITM_EngTQmod_Status_Active_Int = 1;
-              }
-            else{ // 
-                  MITM_EngTQmod_ActivationButton = 0;
-                  TFT_MITM_EngTQmod_Status_Active_Int = 0;
-                  }
+      // // Determine whether to actually activate the MITM EngTQmod 
+      //     if(( CruiseStalk_OFF_FromPT_CAN == 1 && MITM_EngTQmod_AcceptableConditions )   ) { // 
+      //         MITM_EngTQmod_ActivationButton = 1;
+      //         MITM_TCU_EngTQ_0xA7_Status_Active_Int = 1;
+      //         }
+      //       else{ // 
+      //             MITM_EngTQmod_ActivationButton = 0;
+      //             MITM_TCU_EngTQ_0xA7_Status_Active_Int = 0;
+      //             }
 
 
       // Modify PTCAN 0xA7 Frames with edited EngTQ values if MITM EngTQmod is active, otherwise pass them through unmodified
@@ -4373,7 +4480,7 @@ void do_TFT_MITM_TCU_EngTQmod() {
               PT_CAN_msg0x797.len = 8;
               PT_CAN_msg0x797.id = 0x797;
               PT_CAN_msg0x797.buf[0] = 0x1;
-              PT_CAN_msg0x797.buf[1] =  lowByte(TFT_MITM_EngTQmod_Status_Active_Int);
+              PT_CAN_msg0x797.buf[1] =  lowByte(MITM_TCU_EngTQ_0xA7_Status_Active_Int);
               PT_CAN_msg0x797.buf[2] =  lowByte(MITM_TCU_EngTQmod_TQLimit_from_msg0x747_Int);
               PT_CAN_msg0x797.buf[3] = highByte(MITM_TCU_EngTQmod_TQLimit_from_msg0x747_Int);
               PT_CAN_msg0x797.buf[4] =  lowByte(MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int);
@@ -4403,7 +4510,7 @@ void loop_SerialPrinting_MITM_TCU(){
 
 
 
-    if(loopDelaySerialPrint_TCU > 100) {
+    if(loopDelaySerialPrint_TCU > 200) {
                   //  Serial.println("");
 
             // Serial.print("lsbInternalCPUTemp: ");  Serial.print(lsbInternalCPUTemp);  Serial.print("\t ");
@@ -4533,10 +4640,44 @@ void loop_SerialPrinting_MITM_TCU(){
 
             #pragma endregion
 
+            // motor_validate_print_summary();
+            // Serial.println("");
+
+
+            Serial.print("CCStalk_DistDOWN: "); Serial.print(CruiseStalk_DistanceDOWN_bit); Serial.print("\t");
+            Serial.print("PaddleDown: "); Serial.print(Paddle_DOWN_Pulled); Serial.print("\t");
+            Serial.print("MITM_xA7_Status: "); Serial.print(MITM_TCU_EngTQ_0xA7_Status_Active_Int); Serial.print("\t");
+
+            Serial.print("mo11_ori_EngTqTargetRaw: "); Serial.print(motor11_original_EngineTqTargetRaw); Serial.print("\t");
+            // Serial.print("mo11_ori_EngTqActual: "); Serial.print(motor11_original_EngineTqActual); Serial.print("\t");
+            // Serial.print("mo11_ori_EngTqTargetFiltered: "); Serial.print(motor11_original_EngineTqTargetFiltered); Serial.print("\t");
+
+            Serial.print("mo11_EngTqTargetRaw_Mod: "); Serial.print(motor11_EngineTqTargetRaw_Modified); Serial.print("\t");
+            // Serial.print("mo11_EngTqActual_Mod: "); Serial.print(motor11_EngineTqActual_Modified); Serial.print("\t");
+            // Serial.print("mo11_EngTqTargetFiltered_Mod: "); Serial.print(motor11_EngineTqTargetFiltered_Modified); Serial.print("\t");
+
+
+
+            // Serial.print("mo12_ori_EngTq_Neg_Available: "); Serial.print(motor12_original_EngineTq_Neg_Available); Serial.print("\t");
+            // Serial.print("mo12_ori_EngTqLimit_Stat: "); Serial.print(motor12_original_EngineTqLimit_Stat); Serial.print("\t");
+            // Serial.print("mo12_ori_EngTqLimit_Dyn: "); Serial.print(motor12_original_EngineTqLimit_Dyn); Serial.print("\t");
+            // Serial.print("mo12_ori_EngTqPercent: "); Serial.print(motor12_original_EngineTqPercent); Serial.print("\t");
+            // Serial.print("mo12_ori_EngRPM_raw: "); Serial.print(motor12_original_EngineRPM_raw); Serial.print("\t");
+            // Serial.print("mo12_ori_motor12_rpm_physical: "); Serial.print(motor12_original_rpm_physical); Serial.print("\t");
+
+            // Serial.print("mo12_EngTq_Neg_Available_Mod: "); Serial.print(motor12_EngineTq_Neg_Available_Modified); Serial.print("\t");
+            // Serial.print("mo12_EngTqLimit_Stat_Mod: "); Serial.print(motor12_EngineTqLimit_Stat_Modified); Serial.print("\t");
+            // Serial.print("mo12_EngTqLimit_Dyn_Mod: "); Serial.print(motor12_EngineTqLimit_Dyn_Modified); Serial.print("\t");
+            // Serial.print("mo12_EngTqPercent_Mod: "); Serial.print(motor12_EngineTqPercent_Modified); Serial.print("\t");
+            // Serial.print("mo12_EngRPM_raw_Mod: "); Serial.print(motor12_EngineRPM_raw_Modified); Serial.print("\t");
+            // Serial.print("mo12_rpm_physical_Mod: "); Serial.print(motor12_rpm_physical_Modified); Serial.print("\t");
+
+
 
             Serial.println("");
 
-            loopDelaySerialPrint = 0;
+
+            loopDelaySerialPrint_TCU = 0;
         }
 
 

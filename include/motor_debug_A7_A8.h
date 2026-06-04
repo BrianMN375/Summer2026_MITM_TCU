@@ -6,7 +6,7 @@
 //  motor_debug_A7_A8.h
 //
 //  Persistent decoded-signal variables for Motor_11 (0xA7) and Motor_12 (0xA8),
-//  updated on every received frame. Includes throttled Serial.printf debug output.
+//  updated on every received frammotor12_print_debuge. Includes throttled Serial.printf debug output.
 //
 //  Dependencies pulled in automatically above — no manual ordering needed.
 //
@@ -39,7 +39,7 @@
 // ---------------------------------------------------------------------------
 // Debug output control
 // ---------------------------------------------------------------------------
-#define MOTOR_DEBUG_PRINT                     // comment out to silence all prints
+// #define MOTOR_DEBUG_PRINT                     // comment out to silence all prints
 #define MOTOR_DEBUG_INTERVAL_MS   500u        // ms between Serial prints (0 = every frame)
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ static inline void motor_debug_print_all() {
 
 #define MOTOR_VALIDATE                        // comment out to disable entirely
 #define MOTOR_VALIDATE_PRINT_FAILS            // always print on a FAIL (recommended)
-#define MOTOR_VALIDATE_INTERVAL_MS   10000u    // throttle rate for PASS prints (ms)
+#define MOTOR_VALIDATE_INTERVAL_MS   100u    // throttle rate for PASS prints (ms)
 
 #ifdef MOTOR_VALIDATE
 
