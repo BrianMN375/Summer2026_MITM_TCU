@@ -22,7 +22,7 @@
 
 #include <Arduino.h>
 #include <SPI.h>
-#include <SD.h>
+// #include <SD.h>
 #include <FlexCAN_T4.h>
 #include "global_vars.h"
 // #include "checksum.h"
@@ -30,17 +30,19 @@
 // #include "a8_solver.h"
 // #include "motor_signals_A7_A8.h"   // signal structs + pack/unpack
 #include "motor_debug_A7_A8.h"
+#include <elapsedMillis.h>
+
 
 // #include <SD.h>
 
 void can_setup();
 
-void loop_TFTCAN1_poll_MITM_ABS();
-void loop_TFTCAN2_poll_MITM_ABS();
-void loop_TFTCAN3_poll_MITM_ABS();
-void do_TFT_MITM_LC_BumpIn_Statuses();
-void reset_inverse_cache();  // from checksum.cpp
-void loop_SerialPrinting_MITM_ABS();
+// void loop_TFTCAN1_poll_MITM_ABS();
+// void loop_TFTCAN2_poll_MITM_ABS();
+// void loop_TFTCAN3_poll_MITM_ABS();
+// void do_TFT_MITM_LC_BumpIn_Statuses();
+// void reset_inverse_cache();  // from checksum.cpp
+// void loop_SerialPrinting_MITM_ABS();
 
 
 
@@ -48,7 +50,7 @@ void loop_TFTCAN1_poll_MITM_TCU();
 void loop_TFTCAN2_poll_MITM_TCU();
 void loop_TFTCAN3_poll_MITM_TCU();
 void do_TFT_MITM_TCU_EngTQmod();
-void reset_inverse_cache_MITM_TCU();  // from checksum.cpp
+// void reset_inverse_cache_MITM_TCU();  // from checksum.cpp
 void loop_SerialPrinting_MITM_TCU();
 
 
@@ -64,8 +66,8 @@ void setup() {
 
     delay(2000);
 
-    // pinMode(32, OUTPUT);
-    // digitalWrite(32, HIGH);
+    pinMode(32, OUTPUT);
+    digitalWrite(32, HIGH);
 
 
         // CAN
@@ -76,21 +78,21 @@ void setup() {
         // SD
         delay(500);
 
-        if (!SD.begin(BUILTIN_SDCARD)) {
+        // if (!SD.begin(BUILTIN_SDCARD)) {
 
-            Serial.println("SD INIT FAILED");
+        //     Serial.println("SD INIT FAILED");
 
-        } else {
+        // } else {
 
-            Serial.println("SD INIT SUCCESS");
-        }
+        //     Serial.println("SD INIT SUCCESS");
+        //}
     }
 
 
 
 void loop() {
 
-    //   loop_TFTCAN1_poll_MITM_TCU();
+    loop_TFTCAN1_poll_MITM_TCU();
     loop_TFTCAN2_poll_MITM_TCU();
     loop_TFTCAN3_poll_MITM_TCU();
 

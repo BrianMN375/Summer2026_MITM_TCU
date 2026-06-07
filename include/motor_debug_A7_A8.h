@@ -179,7 +179,7 @@ static inline void motor_debug_print_all() {
 
 #define MOTOR_VALIDATE                        // comment out to disable entirely
 #define MOTOR_VALIDATE_PRINT_FAILS            // always print on a FAIL (recommended)
-#define MOTOR_VALIDATE_INTERVAL_MS   100u    // throttle rate for PASS prints (ms)
+#define MOTOR_VALIDATE_INTERVAL_MS   100000u    // throttle rate for PASS prints (ms)
 
 #ifdef MOTOR_VALIDATE
 

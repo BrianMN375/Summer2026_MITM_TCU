@@ -7,10 +7,10 @@
 // #include <TFTCAN_PT_CAN.h>
 // #include <MQB_CANbus_ParsingHelpers.h>
 
+#include <Arduino.h>
 
 // #define VirginModule
 
-#define Concept_MITM_ABS_Node_BumpIn
 #define Concept_MITM_TCU_EngTqMultiplying
 
 
@@ -2371,6 +2371,7 @@ extern unsigned int initialLSB_storedHS1_Output_PWMFreq; // Stored PWM Frequency
 
 #pragma region // FlexCAN Variables - PT-CAN  (primarily variables read from PT-CAN sniffing - Operational and Driver Inputs)
 
+extern FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> TFTCAN1;
 extern FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN2;
 extern FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN3;
 
@@ -4557,6 +4558,7 @@ extern elapsedMillis loopDelaySDCardWrite;
   extern bool EngineTorqueModification_0xA7_Active;
   extern bool EngineTorqueModification_0xA8_Active;
 
+  extern signed long int motor11_EngineTqTargetRaw_Final;
 
 
   extern int EngineTqMultiplier_0xA7_Int; // This is divided by 100 to arrive at the actual multiplier value used (e.g. a value of 120 represents a 1.2 multiplier, a value of 80 represents a 0.8 multiplier, etc)

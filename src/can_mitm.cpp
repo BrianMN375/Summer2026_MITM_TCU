@@ -1,5 +1,5 @@
-#include <Arduino.h>
 #include <FlexCAN_T4.h>
+#include <Arduino.h>
 // #include "checksum.h"
 #include "MQB_CANbus_ParsingHelpers.h"
 #include "global_vars.h"
@@ -7,15 +7,21 @@
 #include "checksum_0xA7_0xA8.h"   // tables + checksum functions
 // #include "motor_signals_A7_A8.h"   // signal structs + pack/unpack
 #include "motor_debug_A7_A8.h"
+#include <elapsedMillis.h>
 
 #pragma region // base FlexCAN Definitions
 
 
 elapsedMillis TimeSinceIgnitionON;
 
-static FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> TFTCAN1; // This is connected to the ABS Node from the interruption in the SuspCAN bus
-static FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN2; // In TCU MITM, This is connected to the TCU side of the interruption between the TCU and ECU. 
-static FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN3; // In TCU MITM, This is connected to the ECU side of the interruption between the TCU and ECU. 
+FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> TFTCAN1; // This is connected to the ABS Node from the interruption in the SuspCAN bus
+FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> TFTCAN2; // In TCU MITM, This is connected to the TCU side of the interruption between the TCU and ECU. 
+FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> TFTCAN3; // In TCU MITM, This is connected to the ECU side of the interruption between the TCU and ECU. 
+
+  // CAN_message_t fromECU_frame;
+  // CAN_message_t fromTCU_frame;
+  // CAN_message_t fromTCU_frame_mod;
+
 
 
 #pragma endregion
@@ -74,28 +80,29 @@ unsigned int MITM_TCU_EngTQmod_ORIG_EngTqRaw_from_0xA7_Int;
 unsigned int MITM_TCU_EngTQmod_MODIFIED_EngTqRaw_from_0xA7_Int;
 
 
-unsigned int motor11_original_EngineTqTargetRaw;
-unsigned int motor11_original_EngineTqActual;
-unsigned int motor11_original_EngineTqTargetFiltered;
+signed long int motor11_original_EngineTqTargetRaw;
+signed long int motor11_original_EngineTqActual;
+signed long int motor11_original_EngineTqTargetFiltered;
+signed long int motor11_EngineTqTargetRaw_Final;
 
-unsigned int motor11_EngineTqTargetRaw_Modified;
-unsigned int motor11_EngineTqActual_Modified;
-unsigned int motor11_EngineTqTargetFiltered_Modified;
+signed long int motor11_EngineTqTargetRaw_Modified;
+signed long int motor11_EngineTqActual_Modified;
+signed long int motor11_EngineTqTargetFiltered_Modified;
 
 
-unsigned int motor12_original_EngineTq_Neg_Available;
-unsigned int motor12_original_EngineTqLimit_Stat;
-unsigned int motor12_original_EngineTqLimit_Dyn;
+signed long int motor12_original_EngineTq_Neg_Available;
+signed long int motor12_original_EngineTqLimit_Stat;
+signed long int motor12_original_EngineTqLimit_Dyn;
 unsigned int motor12_original_EngineTqPercent;
 unsigned int motor12_original_EngineRPM_raw;
 unsigned int motor12_original_rpm_physical;
 
-unsigned int motor12_EngineTq_Neg_Available_Modified;
-unsigned int motor12_EngineTqLimit_Stat_Modified;
-unsigned int motor12_EngineTqLimit_Dyn_Modified;
+signed long int motor12_EngineTq_Neg_Available_Modified;
+signed long int motor12_EngineTqLimit_Stat_Modified;
+signed long int motor12_EngineTqLimit_Dyn_Modified;
 unsigned int motor12_EngineTqPercent_Modified;
 unsigned int motor12_EngineRPM_raw_Modified;
-unsigned int motor12_rpm_physical_Modified;;
+unsigned long int motor12_rpm_physical_Modified;
 
 
 
@@ -119,6 +126,11 @@ float MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float;
 unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit;
 float MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
 
+unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed;
+unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta;
+float MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta_Percentage;
+
+float MITM_TCU_EngTQmod_TQ_Multiplier_TotalReductionPercentage;
 
 
 
@@ -237,7 +249,7 @@ word Susp_CAN_msg0xALL_buf0, Susp_CAN_msg0xALL_buf1, Susp_CAN_msg0xALL_buf2, Sus
   CAN_message_t Susp_CAN_msg0x391; // AccelPedal
 
 
-  CAN_message_t fromECU_frame;
+  // CAN_message_t fromECU_frame;
   CAN_message_t fromECU_frame_Modified;
   CAN_message_t modifiedECU_Frame1;
   CAN_message_t modifiedECU_Frame2;
@@ -1503,19 +1515,6 @@ unsigned int PT_CAN_msg0x787_buf0, PT_CAN_msg0x787_buf1, PT_CAN_msg0x787_buf2, P
 #pragma region // Archive - not currently used
 
 
-// // User-supplied hook
-// extern void user_modify_payload(uint32_t id, uint8_t data[8], bool outbound);
-
-// static void extract_payload7(const uint8_t data[8], uint8_t out7[7]) {
-//   for (int i = 0; i < 7; i++) out7[i] = data[i + 1];
-// }
-
-// //helper
-// void recalcChecksum(CAN_message_t &frame) {
-//     uint8_t newb0 = resolve_X_from_progmem(frame.id, frame.buf);
-//     // frame.buf[0] = newb0;
-//     frame.buf[0] = computeChecksum_7B(frame.id, frame.buf);
-// }
 
 
 
@@ -1591,17 +1590,17 @@ void can_setup() {
 pinMode(32,OUTPUT);
 digitalWrite(32, HIGH);
 
-pinMode(LED_PIN_CANRecieve, OUTPUT);
+// pinMode(LED_PIN_CANRecieve, OUTPUT);
 
 
   TFTCAN1.begin();
     TFTCAN1.setRX(ALT);  // Alt pins when connecting to TFT KitchenSinkCrackHouse v2025x3 or v2025x4 -  
     TFTCAN1.setTX(ALT);
-
   TFTCAN1.setBaudRate(500000);
   TFTCAN1.enableFIFO();
   TFTCAN1.mailboxStatus();
 
+    delay(200);
 
 
 
@@ -1610,6 +1609,7 @@ pinMode(LED_PIN_CANRecieve, OUTPUT);
   TFTCAN2.enableFIFO();
   TFTCAN2.mailboxStatus();
 
+    delay(200);
 
   TFTCAN3.begin();
   TFTCAN3.setBaudRate(500000);
@@ -3532,16 +3532,16 @@ CruiseStalk_OFF_FromPT_CAN = 0;
 
 
 // Poll TFTCAN1(Wired to TCU side of interruption) - direct callback from TFTCAN1 to TFTCAN2 (unmodified TCU data)
-// void loop_TFTCAN1_poll_MITM_TCU() {
-//   CAN_message_t fromTCU_frame;
-//   CAN_message_t fromTCU_frame_mod;
-//   // CAN2 → CAN1
-//   while (TFTCAN1.read(fromTCU_frame)) {
-//     //  printFrame(fromTCU_frame, 2);  // 2 - Printing Raw Messages received on Can2
-//             TFTCAN2.write(fromTCU_frame);
-//             // printFrame(fromTCU_frame, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
-//     }
-//   }
+void loop_TFTCAN1_poll_MITM_TCU() {
+  CAN_message_t fromTCU_frame1;
+  // CAN_message_t fromTCU_frame_mod;
+  // CAN2 → CAN1
+  while (TFTCAN1.read(fromTCU_frame1)) {
+    //  printFrame(fromTCU_frame1, 2);  // 2 - Printing Raw Messages received on Can2
+            // TFTCAN2.write(fromTCU_frame1);
+            // printFrame(fromTCU_frame1, 6);  // 6 - Unmodified Messages forwarding from Can2 (ABS Node) to CAN1 (To Gateway)
+    }
+  }
 
 
 
@@ -3549,7 +3549,7 @@ CruiseStalk_OFF_FromPT_CAN = 0;
   // Poll TFTCAN2 - (Wired to PT_CAN on TCU side of interruption) - Pass all TFTCAN2 frames unmodified through to TFTCAN3
 void loop_TFTCAN2_poll_MITM_TCU() {
   CAN_message_t fromTCU_frame;
-  CAN_message_t fromTCU_frame_mod;
+  // CAN_message_t fromTCU_frame_mod;
 
   // CAN2 → CAN3
     // Sniffing of PT_CAN frames originating from TCU
@@ -3572,6 +3572,7 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
     // Intercept ECU→TCU frames; modify handled IDs, auto-forward everything else
     while (TFTCAN3.read(fromECU_frame)) {
+      // printFrame(fromECU_frame, 4); 
 
         // ---- FAST-PATH: forward unhandled IDs immediately and skip all processing ----
         if (!tcu_mitm_is_handled(fromECU_frame.id)) {
@@ -3964,6 +3965,8 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
 
         if (fromECU_frame.id == 0x3DD){ // paddles
+        // printFrame(fromECU_frame, 3);  // 3 - Printing Raw Messages received on Can3
+
         // Serial.println("tftcan3 recieved");
 
 
@@ -3987,24 +3990,24 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
 
 
-              word PaddlePositionsCAN = PT_CAN_msg0x3DD_buf7;
+              word PaddlePositionsCAN = PT_CAN_msg0x3DD_FromECU_buf7;
               PaddlePositions = PaddlePositionsCAN;
 
-              if(PaddlePositions == 0x00)
+              if(PaddlePositions == 0x0)
                 {
                 Paddle_DOWN_Pulled = 0;
                 Paddle_UP_Pulled = 0;
                 BOTH_Paddles_Pulled = 0;
                 }
 
-              if(PaddlePositions == 0x01)
+              if(PaddlePositions == 0x1)
                 {
                 Paddle_DOWN_Pulled = 1;
                 Paddle_UP_Pulled = 0;
                 BOTH_Paddles_Pulled = 0;
                 }
 
-              if(PaddlePositions == 0x02)
+              if(PaddlePositions == 0x2)
                 {
                 
                 Paddle_DOWN_Pulled = 0;
@@ -4012,7 +4015,7 @@ void loop_TFTCAN3_poll_MITM_TCU() {
                 BOTH_Paddles_Pulled = 0;
                 }
 
-              if(PaddlePositions == 0x03)
+              if(PaddlePositions == 0x3)
                 {
                 Paddle_DOWN_Pulled = 0;
                 Paddle_UP_Pulled = 0;
@@ -4025,6 +4028,7 @@ void loop_TFTCAN3_poll_MITM_TCU() {
         
         if (fromECU_frame.id == 0xA7){ // Engine Torque Actuals - from ECU
                 // Serial.println("TFTCAN2 recieved");
+                  // TFTCAN2.write(fromECU_frame); // if no modification, forward unmodified frame to CAN3 (to Gateway/ECU)
 
             #pragma region // Motor 11 - CAN bytes Raw
 
@@ -4061,70 +4065,58 @@ void loop_TFTCAN3_poll_MITM_TCU() {
                 MQB_Motor_11_0xA7_QBit_EngineTq = motor11.MO_QBit_EngineTq;
 
 
-
-                motor11_validate(fromECU_frame.buf);    // <-- add this line
-                motor11_update(fromECU_frame.buf);          // decode → g_mo11, throttled print
-                // motor11_print_debug();
-
-              //     Serial.printf(
-              //     "[TqTargetRaw=%d Nm | TqActual=%d Nm | "
-              //     "TotalMI=%d Nm | TqFiltered=%d Nm \n" ,
-              //     g_mo11.EngineTqTargetRaw,
-              //     g_mo11.EngineTqActual,
-              //     g_mo11.EngineTotalMomentsInertia,
-              //     g_mo11.EngineTqTargetFiltered
-
-              // );
-
-
                 // ---- Original data parsed from CAN frames ----
                 motor11_original_EngineTqTargetRaw = g_mo11.EngineTqTargetRaw;
                 motor11_original_EngineTqActual = g_mo11.EngineTqActual;
                 motor11_original_EngineTqTargetFiltered =  g_mo11.EngineTqTargetFiltered;
 
 
-                // ---- MODIFICATIONS (edit g_mo11 fields directly) ----
-                motor11_EngineTqTargetRaw_Modified =  g_mo11.EngineTqTargetRaw * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
-                motor11_EngineTqActual_Modified =  g_mo11.EngineTqActual * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
-                motor11_EngineTqTargetFiltered_Modified =  g_mo11.EngineTqTargetFiltered * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
+                motor11_validate(fromECU_frame.buf);    // <-- add this line
+                motor11_update(fromECU_frame.buf);          // decode → g_mo11, throttled print
+                // // motor11_print_debug();
 
 
 
-
-// if (loopDelaySerialPrint_TCU > 500) {
-                // Serial.print("motor11_original_EngineTqTargetRaw: "); Serial.print(motor11_original_EngineTqTargetRaw); Serial.print("\t");
-                // Serial.print("motor11_original_EngineTqActual: "); Serial.print(motor11_original_EngineTqActual); Serial.print("\t");
-                // Serial.print("motor11_original_EngineTqTargetFiltered: "); Serial.print(motor11_original_EngineTqTargetFiltered); Serial.print("\t");
-                // Serial.print("motor11_EngineTqTargetRaw_Mod: "); Serial.print(motor11_EngineTqTargetRaw_Modified); Serial.print("\t");
-                // Serial.print("motor11_EngineTqActual_Mod: "); Serial.print(motor11_EngineTqActual_Modified); Serial.print("\t");
-                // Serial.print("motor11_EngineTqTargetFiltered_Mod: "); Serial.print(motor11_EngineTqTargetFiltered_Modified); Serial.print("\t");
-                // Serial.println("");
-                // }
 
           if(MITM_TCU_EngTQ_0xA7_Status_Active_Int == 1) {
 
                   CAN_message_t fromECU_frame_Modified = fromECU_frame;
 
                   // ---- MODIFICATIONS (edit g_mo11 fields directly) ----
-                  g_mo11.EngineTqTargetRaw     = 15;
-                  g_mo11.EngineTqActual        = 15;
-                  g_mo11.EngineTqTargetFiltered = 15;
+                  // g_mo11.EngineTqTargetRaw     = 45;
+                  // g_mo11.EngineTqActual        = 45;
+                  // g_mo11.EngineTqTargetFiltered = 45;
 
+                // ---- MODIFICATIONS (edit g_mo11 fields directly) ----
+                // motor11_EngineTqTargetRaw_Modified =  g_mo11.EngineTqTargetRaw * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
+                motor11_EngineTqActual_Modified =  g_mo11.EngineTqActual * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
+                motor11_EngineTqTargetFiltered_Modified =  g_mo11.EngineTqTargetFiltered * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
 
                 // g_mo11.EngineTqTargetRaw      = motor11_EngineTqTargetRaw_Modified;
-                // g_mo11.EngineTqActual         = motor11_EngineTqActual_Modified;
-                // g_mo11.EngineTqTargetFiltered = motor11_EngineTqTargetFiltered_Modified;
+                g_mo11.EngineTqActual         = motor11_EngineTqActual_Modified;
+                g_mo11.EngineTqTargetFiltered = motor11_EngineTqTargetFiltered_Modified;
 
                   // ----------------------------------------------------------
-                // motor11_update(fromECU_frame.buf);          // decode → g_mo11, throttled print
+                // motor11_update(fromECU_frame_Modified.buf);          // decode → g_mo11, throttled print
 
 
               motor11_encode(fromECU_frame_Modified.buf, g_mo11);
               //  motor11_update(fromECU_frame_Modified.buf);          // decode → g_mo11, throttled print
+              //  motor11_update(fromECU_frame.buf);          // decode → g_mo11, throttled print
 
               build_frame_with_checksum_0xA7(fromECU_frame_Modified.buf);
 
               motor11_validate(fromECU_frame_Modified.buf);    // <-- add this line
+
+
+
+                // motor11_original_EngineTqTargetRaw = g_mo11.EngineTqTargetRaw;
+                // motor11_original_EngineTqActual = g_mo11.EngineTqActual;
+                // motor11_original_EngineTqTargetFiltered =  g_mo11.EngineTqTargetFiltered;
+
+
+
+
 
               // Serial.printf(
               // "[TqTargetRaw=%d Nm | TqActual=%d Nm | "
@@ -4134,7 +4126,7 @@ void loop_TFTCAN3_poll_MITM_TCU() {
               // g_mo11.EngineTotalMomentsInertia,
               // g_mo11.EngineTqTargetFiltered
               // );
-
+              //  motor11_EngineTqTargetRaw_Final = g_mo11.EngineTqTargetRaw;
                TFTCAN2.write(fromECU_frame_Modified);
 
                 }
@@ -4155,6 +4147,7 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
         if (fromECU_frame.id == 0xA8){ // More Engine Torque Actuals - from ECU
                 // Serial.println("TFTCAN2 recieved");
+                    //  TFTCAN2.write(fromECU_frame); // if no modification, forward unmodified frame to CAN3 (to Gateway/ECU)
 
             #pragma region // Motor 12 - CAN bytes Raw
 
@@ -4180,9 +4173,9 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
                   #pragma endregion
 
-                motor12_validate(fromECU_frame.buf);    // <-- add this line
-                motor12_update(fromECU_frame.buf);          // decode → g_mo12, throttled print
-                // motor12_print_debug();
+                // motor12_validate(fromECU_frame.buf);    // <-- add this line
+                // motor12_update(fromECU_frame.buf);          // decode → g_mo12, throttled print
+                // // motor12_print_debug();
 
 
 
@@ -4366,10 +4359,13 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
         }
 
-// Forward all handled frames that weren't already forwarded above (0xA7/0xA8 handle their own)
-        if (fromECU_frame.id != 0xA7 && fromECU_frame.id != 0xA8) {
-            TFTCAN2.write(fromECU_frame);
-          }
+      // Forward all handled frames that weren't already forwarded above (0xA7/0xA8 handle their own)
+      if ((fromECU_frame.id != 0xA7) && (fromECU_frame.id != 0xA8)) {
+
+            //  Serial.println("tftcan2 forwarded because of 0xA7 or 0xA8 recieved");
+
+                  TFTCAN2.write(fromECU_frame);
+                }
 
 
 // Sniff non-OEM frames that don't need to be sent to the TCU
@@ -4399,16 +4395,18 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
                   if(PT_CAN_msg0x785_buf0_Raw == 0x1) {
 
-                      MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromECU_buf1);
-                      MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromECU_buf2);
-                      MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
+                      MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromECU_buf1);
+                      // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
+
+                      MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed = (PT_CAN_msg0x785_FromECU_buf2);
+
 
                     }
 
-                    MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = 90; // for testing
-                    MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0; // temporary testing
+                    // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = 50; // for testing
+                    // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0; // temporary testing
 
-                    MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = 22; // for testing - this would be multiplied by 10 to arrive at 220Nm torque limit.
+                    // MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = 22; // for testing - this would be multiplied by 10 to arrive at 220Nm torque limit.
 
               }
 
@@ -4422,14 +4420,10 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
 void do_TFT_MITM_TCU_EngTQmod() {
 
-
-        MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit = 100; // 
-        MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float = MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit / 100.0; // this is the final multiplier value that will be applied to the EngTq from 0xA7
-
-
+    #pragma region // Determine conditions to allow/disallow Tq Multiplier to be applied to 0xA7
 
         // if(GearLeverPosition_TIP == 1 ) { // Initial Determination of "Acceptable Conditions" for EngTqModification
-        if(CruiseStalk_DistanceDOWN_bit == 1 ) { // Initial Determination of "Acceptable Conditions" for EngTqModification
+        if(CruiseStalk_DistanceDOWN_bit == 1 || Paddle_DOWN_Pulled == 1) { // Initial Determination of "Acceptable Conditions" for EngTqModification
               MITM_EngTQmod_AcceptableConditions = 1;
               MITM_EngTQmod_ActivationButton = 1;
               MITM_TCU_EngTQ_0xA7_Status_Active_Int = 1;
@@ -4443,32 +4437,39 @@ void do_TFT_MITM_TCU_EngTQmod() {
             }
 
 
-      // // Determine whether to actually activate the MITM EngTQmod 
-      //     if(( CruiseStalk_OFF_FromPT_CAN == 1 && MITM_EngTQmod_AcceptableConditions )   ) { // 
-      //         MITM_EngTQmod_ActivationButton = 1;
-      //         MITM_TCU_EngTQ_0xA7_Status_Active_Int = 1;
-      //         }
-      //       else{ // 
-      //             MITM_EngTQmod_ActivationButton = 0;
-      //             MITM_TCU_EngTQ_0xA7_Status_Active_Int = 0;
-      //             }
+    #pragma endregion
 
+
+    #pragma region // Regardless of Enable/Disabled conditions, Calculate the Torque Multipliplier that could be applied based on wheel speed and 
+
+        MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
+
+        MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta = MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed - WhlSpd_All_Avg_Float;
+        MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta_Percentage = MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta / MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed;
+
+        MITM_TCU_EngTQmod_TQ_Multiplier_TotalReductionPercentage = ((1.0 - MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float) * MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta_Percentage);
+
+
+
+
+        MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float = (1.0 - MITM_TCU_EngTQmod_TQ_Multiplier_TotalReductionPercentage); // this is the final multiplier value that will be applied to the EngTq from 0xA7
+        MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float = constrain(MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float,0.0,1.0);
+
+
+    #pragma endregion
+
+
+    #pragma region // If the conditions are allowed and Active, apply the torque multiplier. 
 
       // Modify PTCAN 0xA7 Frames with edited EngTQ values if MITM EngTQmod is active, otherwise pass them through unmodified
-          if(MITM_EngTQmod_ActivationButton == 1) {
 
-                MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int = (MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float * MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int);
-                MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int = (MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit * 10);
+                // MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int = (MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float * MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int);
+                // MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int = (MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit * 10);
 
                 
                 // Serial.print("MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int: "); Serial.print(MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int); Serial.print("\t");
                 // Serial.print("MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int: "); Serial.print(MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int); Serial.print("\t");
                 // Serial.println();
-
-            }
-            else {
-                  MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int = MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int;
-              }
                 
 
 
@@ -4644,17 +4645,31 @@ void loop_SerialPrinting_MITM_TCU(){
             // Serial.println("");
 
 
-            Serial.print("CCStalk_DistDOWN: "); Serial.print(CruiseStalk_DistanceDOWN_bit); Serial.print("\t");
-            Serial.print("PaddleDown: "); Serial.print(Paddle_DOWN_Pulled); Serial.print("\t");
+            // Serial.print("PT_CAN_msg0x120_buf3_Raw: "); Serial.print(PT_CAN_msg0x120_buf3_Raw); Serial.print("\t");
+            // Serial.print("CC_ON_FromPT_CAN: "); Serial.print(CruiseStalk_ON_FromPT_CAN); Serial.print("\t");
+            // Serial.print("CC_OFF_FromPT_CAN: "); Serial.print(CruiseStalk_OFF_FromPT_CAN); Serial.print("\t");
+            // Serial.print("CCStalk_DistDOWN: "); Serial.print(CruiseStalk_DistanceDOWN_bit); Serial.print("\t");
+            // Serial.print("PaddleDown: "); Serial.print(Paddle_DOWN_Pulled); Serial.print("\t");
+            // Serial.print("PaddlePositions: "); Serial.print(PaddlePositions); Serial.print("\t");
+
             Serial.print("MITM_xA7_Status: "); Serial.print(MITM_TCU_EngTQ_0xA7_Status_Active_Int); Serial.print("\t");
 
-            Serial.print("mo11_ori_EngTqTargetRaw: "); Serial.print(motor11_original_EngineTqTargetRaw); Serial.print("\t");
+
+            // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
+            // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
+            Serial.print("MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float); Serial.print("\t");
+            // Serial.print("TqMultiplier_0x785_float: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float); Serial.print("\t");
+            Serial.print("MQB_Motor_11_0xA7_EngineTqActual_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqActual_0xA7); Serial.print("\t");
             // Serial.print("mo11_ori_EngTqActual: "); Serial.print(motor11_original_EngineTqActual); Serial.print("\t");
             // Serial.print("mo11_ori_EngTqTargetFiltered: "); Serial.print(motor11_original_EngineTqTargetFiltered); Serial.print("\t");
 
-            Serial.print("mo11_EngTqTargetRaw_Mod: "); Serial.print(motor11_EngineTqTargetRaw_Modified); Serial.print("\t");
-            // Serial.print("mo11_EngTqActual_Mod: "); Serial.print(motor11_EngineTqActual_Modified); Serial.print("\t");
+            // Serial.print("mo11_EngTqTargetRaw_Mod: "); Serial.print(motor11_EngineTqTargetRaw_Modified); Serial.print("\t");
+            Serial.print("mo11_EngTqActual_Mod: "); Serial.print(motor11_EngineTqActual_Modified); Serial.print("\t");
             // Serial.print("mo11_EngTqTargetFiltered_Mod: "); Serial.print(motor11_EngineTqTargetFiltered_Modified); Serial.print("\t");
+
+            // Serial.print("g_mo11.EngineTqTargetRaw_Final: "); Serial.print(g_mo11.EngineTqTargetRaw); Serial.print("\t");
+            Serial.print("g_mo11.EngineTqActual_Final: "); Serial.print(g_mo11.EngineTqActual); Serial.print("\t");
+            // Serial.print("g_mo11.EngineTqTargetRaw_Final: "); Serial.print(g_mo11.EngineTqTargetRaw); Serial.print("\t");
 
 
 
