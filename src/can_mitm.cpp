@@ -47,6 +47,12 @@ elapsedMillis GenericCANtx_IncrementingTimer3;
 elapsedMillis PT_CAN_canTxInterval_0x795;
 elapsedMillis PT_CAN_canTxInterval_0x796;
 elapsedMillis PT_CAN_canTxInterval_0x797;
+elapsedMillis PT_CAN_canTxInterval_0x798;
+elapsedMillis PT_CAN_canTxInterval_0x799;
+
+unsigned int PT_CAN_0x797_muxLevel;
+unsigned int PT_CAN_0x798_muxLevel;
+unsigned int PT_CAN_0x799_muxLevel;
 
 elapsedMillis LC_BumpIn_TimeSinceActivation;
 
@@ -76,8 +82,8 @@ unsigned int MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int;
 unsigned int MITM_TCU_EngTQmod_ORIG_EngTqActual_from_0xA7_Int;
 unsigned int MITM_TCU_EngTQmod_MODIFIED_EngTqActual_from_0xA7_Int;
 
-unsigned int MITM_TCU_EngTQmod_ORIG_EngTqRaw_from_0xA7_Int;
-unsigned int MITM_TCU_EngTQmod_MODIFIED_EngTqRaw_from_0xA7_Int;
+unsigned int MITM_TCU_EngTQmod_ORIG_EngTqTgtRaw_from_0xA7_Int;
+unsigned int MITM_TCU_EngTQmod_MODIFIED_EngTqTgtRaw_from_0xA7_Int;
 
 
 signed long int motor11_original_EngineTqTargetRaw;
@@ -120,14 +126,18 @@ float MITM_TCU_EngTQmod_TQLimit_from_msg0x747_Float;
 unsigned int MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit;
 float MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Float;
 
+unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Int_8bit;
+float MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Float;
+
 unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit;
 float MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float;
+
 
 unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit;
 float MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
 
 unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed;
-unsigned int MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta;
+float MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta;
 float MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta_Percentage;
 
 float MITM_TCU_EngTQmod_TQ_Multiplier_TotalReductionPercentage;
@@ -987,6 +997,7 @@ unsigned int PT_CAN_msg0x394_FromECU_buf0, PT_CAN_msg0x394_FromECU_buf1, PT_CAN_
 unsigned int PT_CAN_msg0x3DD_FromECU_buf0, PT_CAN_msg0x3DD_FromECU_buf1, PT_CAN_msg0x3DD_FromECU_buf2, PT_CAN_msg0x3DD_FromECU_buf3, PT_CAN_msg0x3DD_FromECU_buf4, PT_CAN_msg0x3DD_FromECU_buf5, PT_CAN_msg0x3DD_FromECU_buf6, PT_CAN_msg0x3DD_FromECU_buf7; // 0x3DD is for paddle positions/shift status
 unsigned int PT_CAN_msg0x598_FromECU_buf0, PT_CAN_msg0x598_FromECU_buf1, PT_CAN_msg0x598_FromECU_buf2, PT_CAN_msg0x598_FromECU_buf3, PT_CAN_msg0x598_FromECU_buf4, PT_CAN_msg0x598_FromECU_buf5, PT_CAN_msg0x598_FromECU_buf6, PT_CAN_msg0x598_FromECU_buf7;
 unsigned int PT_CAN_msg0x670_FromECU_buf0, PT_CAN_msg0x670_FromECU_buf1, PT_CAN_msg0x670_FromECU_buf2, PT_CAN_msg0x670_FromECU_buf3, PT_CAN_msg0x670_FromECU_buf4, PT_CAN_msg0x670_FromECU_buf5, PT_CAN_msg0x670_FromECU_buf6, PT_CAN_msg0x670_FromECU_buf7;
+unsigned int PT_CAN_msg0x784_FromECU_buf0, PT_CAN_msg0x784_FromECU_buf1, PT_CAN_msg0x784_FromECU_buf2, PT_CAN_msg0x784_FromECU_buf3, PT_CAN_msg0x784_FromECU_buf4, PT_CAN_msg0x784_FromECU_buf5, PT_CAN_msg0x784_FromECU_buf6, PT_CAN_msg0x784_FromECU_buf7;
 unsigned int PT_CAN_msg0x785_FromECU_buf0, PT_CAN_msg0x785_FromECU_buf1, PT_CAN_msg0x785_FromECU_buf2, PT_CAN_msg0x785_FromECU_buf3, PT_CAN_msg0x785_FromECU_buf4, PT_CAN_msg0x785_FromECU_buf5, PT_CAN_msg0x785_FromECU_buf6, PT_CAN_msg0x785_FromECU_buf7;
 unsigned int PT_CAN_msg0x786_FromECU_buf0, PT_CAN_msg0x786_FromECU_buf1, PT_CAN_msg0x786_FromECU_buf2, PT_CAN_msg0x786_FromECU_buf3, PT_CAN_msg0x786_FromECU_buf4, PT_CAN_msg0x786_FromECU_buf5, PT_CAN_msg0x786_FromECU_buf6, PT_CAN_msg0x786_FromECU_buf7;
 unsigned int PT_CAN_msg0x787_FromECU_buf0, PT_CAN_msg0x787_FromECU_buf1, PT_CAN_msg0x787_FromECU_buf2, PT_CAN_msg0x787_FromECU_buf3, PT_CAN_msg0x787_FromECU_buf4, PT_CAN_msg0x787_FromECU_buf5, PT_CAN_msg0x787_FromECU_buf6, PT_CAN_msg0x787_FromECU_buf7;
@@ -4070,6 +4081,7 @@ void loop_TFTCAN3_poll_MITM_TCU() {
                 motor11_original_EngineTqActual = g_mo11.EngineTqActual;
                 motor11_original_EngineTqTargetFiltered =  g_mo11.EngineTqTargetFiltered;
 
+                MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int = MQB_Motor_11_0xA7_EngineTqTargetFiltered_0xA7;
 
                 motor11_validate(fromECU_frame.buf);    // <-- add this line
                 motor11_update(fromECU_frame.buf);          // decode → g_mo11, throttled print
@@ -4088,11 +4100,13 @@ void loop_TFTCAN3_poll_MITM_TCU() {
                   // g_mo11.EngineTqTargetFiltered = 45;
 
                 // ---- MODIFICATIONS (edit g_mo11 fields directly) ----
-                // motor11_EngineTqTargetRaw_Modified =  g_mo11.EngineTqTargetRaw * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
+                motor11_EngineTqTargetRaw_Modified =  g_mo11.EngineTqTargetRaw * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
                 motor11_EngineTqActual_Modified =  g_mo11.EngineTqActual * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
                 motor11_EngineTqTargetFiltered_Modified =  g_mo11.EngineTqTargetFiltered * MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float;
 
-                // g_mo11.EngineTqTargetRaw      = motor11_EngineTqTargetRaw_Modified;
+                MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int = motor11_EngineTqTargetFiltered_Modified;
+
+                g_mo11.EngineTqTargetRaw      = motor11_EngineTqTargetRaw_Modified;
                 g_mo11.EngineTqActual         = motor11_EngineTqActual_Modified;
                 g_mo11.EngineTqTargetFiltered = motor11_EngineTqTargetFiltered_Modified;
 
@@ -4178,8 +4192,6 @@ void loop_TFTCAN3_poll_MITM_TCU() {
                 // // motor12_print_debug();
 
 
-
-
                   motor12_original_EngineTq_Neg_Available = g_mo12.EngineTq_Neg_Available;
                   motor12_original_EngineTqLimit_Stat = g_mo12.EngineTqLimit_Stat;
                   motor12_original_EngineTqLimit_Dyn = g_mo12.EngineTqLimit_Dyn;
@@ -4197,16 +4209,12 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
                   // ----------------------------------------------------------
 
-
-
             // Serial.print("mo12_ori_EngTq_Neg_Available: "); Serial.print(motor12_original_EngineTq_Neg_Available); Serial.print("\t");
             // Serial.print("mo12_ori_EngTqLimit_Stat: "); Serial.print(motor12_original_EngineTqLimit_Stat); Serial.print("\t");
             // Serial.print("mo12_ori_EngTqLimit_Dyn: "); Serial.print(motor12_original_EngineTqLimit_Dyn); Serial.print("\t");
             // Serial.print("mo12_ori_EngTqPercent: "); Serial.print(motor12_original_EngineTqPercent); Serial.print("\t");
             // Serial.print("mo12_ori_EngRPM_raw: "); Serial.print(motor12_original_EngineRPM_raw); Serial.print("\t");
             // Serial.print("mo12_ori_motor12_rpm_physical: "); Serial.print(motor12_original_rpm_physical); Serial.print("\t");
-
-
 
             // Serial.print("mo12_EngTq_Neg_Available_Mod: "); Serial.print(motor12_EngineTq_Neg_Available_Modified); Serial.print("\t");
             // Serial.print("mo12_EngTqLimit_Stat_Mod: "); Serial.print(motor12_EngineTqLimit_Stat_Modified); Serial.print("\t");
@@ -4216,11 +4224,7 @@ void loop_TFTCAN3_poll_MITM_TCU() {
             // Serial.print("motor12_motor12_rpm_physical_Mod: "); Serial.print(motor12_rpm_physical_Modified); Serial.print("\t");
 
 
-
-
-
                 if(MITM_TCU_EngTQ_0xA8_Status_Active_Int == 1) {
-
 
                 CAN_message_t fromECU_frame_Modified = fromECU_frame;
 
@@ -4370,45 +4374,85 @@ void loop_TFTCAN3_poll_MITM_TCU() {
 
 // Sniff non-OEM frames that don't need to be sent to the TCU
 
-        if (fromECU_frame.id == 0x785){ // Sniff the desired EngTQ Limit or EngTQ Multiplier, which would originate from the TFT Master Module 
+     if (fromECU_frame.id == 0x784){ // Sniff the desired EngTQ Limit or EngTQ Multiplier, which would originate from the TFT Master Module 
                 // Serial.println("tftcan3 recieved");
 
 
-                  PT_CAN_msg0x785_buf0_Raw = fromECU_frame.buf[0];
-                  PT_CAN_msg0x785_buf1_Raw = fromECU_frame.buf[1];
-                  PT_CAN_msg0x785_buf2_Raw = fromECU_frame.buf[2];
-                  PT_CAN_msg0x785_buf3_Raw = fromECU_frame.buf[3];
-                  PT_CAN_msg0x785_buf4_Raw = fromECU_frame.buf[4];
-                  PT_CAN_msg0x785_buf5_Raw = fromECU_frame.buf[5];
-                  PT_CAN_msg0x785_buf6_Raw = fromECU_frame.buf[6];
-                  PT_CAN_msg0x785_buf7_Raw = fromECU_frame.buf[7];
+              PT_CAN_msg0x784_buf0_Raw = fromECU_frame.buf[0];
+              PT_CAN_msg0x784_buf1_Raw = fromECU_frame.buf[1];
+              PT_CAN_msg0x784_buf2_Raw = fromECU_frame.buf[2];
+              PT_CAN_msg0x784_buf3_Raw = fromECU_frame.buf[3];
+              PT_CAN_msg0x784_buf4_Raw = fromECU_frame.buf[4];
+              PT_CAN_msg0x784_buf5_Raw = fromECU_frame.buf[5];
+              PT_CAN_msg0x784_buf6_Raw = fromECU_frame.buf[6];
+              PT_CAN_msg0x784_buf7_Raw = fromECU_frame.buf[7];
 
-                  PT_CAN_msg0x785_FromECU_buf0 = PT_CAN_msg0x785_buf0_Raw;
-                  PT_CAN_msg0x785_FromECU_buf1 = PT_CAN_msg0x785_buf1_Raw;
-                  PT_CAN_msg0x785_FromECU_buf2 = PT_CAN_msg0x785_buf2_Raw;
-                  PT_CAN_msg0x785_FromECU_buf3 = PT_CAN_msg0x785_buf3_Raw;
-                  PT_CAN_msg0x785_FromECU_buf4 = PT_CAN_msg0x785_buf4_Raw;
-                  PT_CAN_msg0x785_FromECU_buf5 = PT_CAN_msg0x785_buf5_Raw;
-                  PT_CAN_msg0x785_FromECU_buf6 = PT_CAN_msg0x785_buf6_Raw;
-                  PT_CAN_msg0x785_FromECU_buf7 = PT_CAN_msg0x785_buf7_Raw;
-
-
-                  if(PT_CAN_msg0x785_buf0_Raw == 0x1) {
-
-                      MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromECU_buf1);
-                      // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
-
-                      MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed = (PT_CAN_msg0x785_FromECU_buf2);
+              PT_CAN_msg0x784_FromECU_buf0 = PT_CAN_msg0x784_buf0_Raw;
+              PT_CAN_msg0x784_FromECU_buf1 = PT_CAN_msg0x784_buf1_Raw;
+              PT_CAN_msg0x784_FromECU_buf2 = PT_CAN_msg0x784_buf2_Raw;
+              PT_CAN_msg0x784_FromECU_buf3 = PT_CAN_msg0x784_buf3_Raw;
+              PT_CAN_msg0x784_FromECU_buf4 = PT_CAN_msg0x784_buf4_Raw;
+              PT_CAN_msg0x784_FromECU_buf5 = PT_CAN_msg0x784_buf5_Raw;
+              PT_CAN_msg0x784_FromECU_buf6 = PT_CAN_msg0x784_buf6_Raw;
+              PT_CAN_msg0x784_FromECU_buf7 = PT_CAN_msg0x784_buf7_Raw;
 
 
-                    }
+             if(PT_CAN_msg0x784_buf0_Raw == 0x1) {
 
-                    // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = 50; // for testing
-                    // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0; // temporary testing
+                MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Int_8bit = (PT_CAN_msg0x784_FromECU_buf1);
+                // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Int_8bit / 100.0;
 
-                    // MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = 22; // for testing - this would be multiplied by 10 to arrive at 220Nm torque limit.
+                MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed = (PT_CAN_msg0x784_FromECU_buf2);
+
+
+                 }
+
+                // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Int_8bit = 50; // for testing
+                MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Int_8bit / 100.0; // temporary testin
+                // MITM_TCU_EngTQmod_TQ_Limit_from_msg0x784_Int_8bit = 22; // for testing - this would be multiplied by 10 to arrive at 220Nm torque limit.
 
               }
+
+
+
+        if (fromECU_frame.id == 0x785){ // Sniff the desired EngTQ Limit or EngTQ Multiplier, which would originate from the TFT Master Module 
+              // Serial.println("tftcan3 recieved");
+
+
+              PT_CAN_msg0x785_buf0_Raw = fromECU_frame.buf[0];
+              PT_CAN_msg0x785_buf1_Raw = fromECU_frame.buf[1];
+              PT_CAN_msg0x785_buf2_Raw = fromECU_frame.buf[2];
+              PT_CAN_msg0x785_buf3_Raw = fromECU_frame.buf[3];
+              PT_CAN_msg0x785_buf4_Raw = fromECU_frame.buf[4];
+              PT_CAN_msg0x785_buf5_Raw = fromECU_frame.buf[5];
+              PT_CAN_msg0x785_buf6_Raw = fromECU_frame.buf[6];
+              PT_CAN_msg0x785_buf7_Raw = fromECU_frame.buf[7];
+
+              PT_CAN_msg0x785_FromECU_buf0 = PT_CAN_msg0x785_buf0_Raw;
+              PT_CAN_msg0x785_FromECU_buf1 = PT_CAN_msg0x785_buf1_Raw;
+              PT_CAN_msg0x785_FromECU_buf2 = PT_CAN_msg0x785_buf2_Raw;
+              PT_CAN_msg0x785_FromECU_buf3 = PT_CAN_msg0x785_buf3_Raw;
+              PT_CAN_msg0x785_FromECU_buf4 = PT_CAN_msg0x785_buf4_Raw;
+              PT_CAN_msg0x785_FromECU_buf5 = PT_CAN_msg0x785_buf5_Raw;
+              PT_CAN_msg0x785_FromECU_buf6 = PT_CAN_msg0x785_buf6_Raw;
+              PT_CAN_msg0x785_FromECU_buf7 = PT_CAN_msg0x785_buf7_Raw;
+
+
+              if(PT_CAN_msg0x785_buf0_Raw == 0x1) {
+
+                 MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = (PT_CAN_msg0x785_FromECU_buf1);
+                //  MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
+
+                  MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed = (PT_CAN_msg0x785_FromECU_buf2);
+
+                  }
+
+                // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit = 50; // for testing
+                // MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0; // temporary testing
+                // MITM_TCU_EngTQmod_TQ_Limit_from_msg0x785_Int_8bit = 22; // for testing - this would be multiplied by 10 to arrive at 220Nm torque limit.
+
+                }
+
 
 
 
@@ -4442,11 +4486,14 @@ void do_TFT_MITM_TCU_EngTQmod() {
 
     #pragma region // Regardless of Enable/Disabled conditions, Calculate the Torque Multipliplier that could be applied based on wheel speed and 
 
+        MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Int_8bit / 100.0;
         MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float = MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit / 100.0;
 
-        MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta = MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed - WhlSpd_All_Avg_Float;
+
+        MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta = MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed - WhlSpdAvg_Float;
         MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta_Percentage = MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta / MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed;
 
+        // MITM_TCU_EngTQmod_TQ_Multiplier_TotalReductionPercentage = ((1.0 - MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Float) * MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta_Percentage);
         MITM_TCU_EngTQmod_TQ_Multiplier_TotalReductionPercentage = ((1.0 - MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float) * MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta_Percentage);
 
 
@@ -4454,7 +4501,7 @@ void do_TFT_MITM_TCU_EngTQmod() {
 
         MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float = (1.0 - MITM_TCU_EngTQmod_TQ_Multiplier_TotalReductionPercentage); // this is the final multiplier value that will be applied to the EngTq from 0xA7
         MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float = constrain(MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float,0.0,1.0);
-
+        MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit = (MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float * 100);
 
     #pragma endregion
 
@@ -4474,32 +4521,92 @@ void do_TFT_MITM_TCU_EngTQmod() {
 
 
       // Send Operational Statuses periodically, for TFT Module and ECU to recognize MITM Statuses
-      if(MITM_EngTQmod_AcceptableConditions >= 1) {
+      // if(MITM_EngTQmod_AcceptableConditions >= 1) {
 
 
-              CAN_message_t PT_CAN_msg0x797;
-              PT_CAN_msg0x797.len = 8;
-              PT_CAN_msg0x797.id = 0x797;
-              PT_CAN_msg0x797.buf[0] = 0x1;
-              PT_CAN_msg0x797.buf[1] =  lowByte(MITM_TCU_EngTQ_0xA7_Status_Active_Int);
-              PT_CAN_msg0x797.buf[2] =  lowByte(MITM_TCU_EngTQmod_TQLimit_from_msg0x747_Int);
-              PT_CAN_msg0x797.buf[3] = highByte(MITM_TCU_EngTQmod_TQLimit_from_msg0x747_Int);
-              PT_CAN_msg0x797.buf[4] =  lowByte(MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int);
-              PT_CAN_msg0x797.buf[5] = highByte(MITM_TCU_EngTQmod_ORIG_EngTqFiltered_from_0xA7_Int);
-              PT_CAN_msg0x797.buf[6] =  lowByte(MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int);
-              PT_CAN_msg0x797.buf[7] = highByte(MITM_TCU_EngTQmod_MODIFIED_EngTqFiltered_from_0xA7_Int);
+              CAN_message_t PT_CAN_msg0x797_mux1;
+              PT_CAN_msg0x797_mux1.len = 8;
+              PT_CAN_msg0x797_mux1.id = 0x797;
+              PT_CAN_msg0x797_mux1.buf[0] = 0x1;
+              PT_CAN_msg0x797_mux1.buf[1] =  lowByte(MITM_TCU_EngTQ_0xA7_Status_Active_Int);
+              PT_CAN_msg0x797_mux1.buf[2] =  lowByte(motor11_original_EngineTqTargetRaw);
+              PT_CAN_msg0x797_mux1.buf[3] = highByte(motor11_original_EngineTqTargetRaw);
+              PT_CAN_msg0x797_mux1.buf[4] =  lowByte(motor11_original_EngineTqActual);
+              PT_CAN_msg0x797_mux1.buf[5] = highByte(motor11_original_EngineTqActual);
+              PT_CAN_msg0x797_mux1.buf[6] =  lowByte(motor11_original_EngineTqTargetFiltered);
+              PT_CAN_msg0x797_mux1.buf[7] = highByte(motor11_original_EngineTqTargetFiltered);
 
 
+              CAN_message_t PT_CAN_msg0x797_mux2;
+              PT_CAN_msg0x797_mux2.len = 8;
+              PT_CAN_msg0x797_mux2.id = 0x797;
+              PT_CAN_msg0x797_mux2.buf[0] = 0x2;
+              PT_CAN_msg0x797_mux2.buf[1] =  lowByte(MITM_TCU_EngTQmod_TQ_Multiplier_Final_Int_8bit);
+              PT_CAN_msg0x797_mux2.buf[2] =  lowByte(motor11_EngineTqTargetRaw_Modified);
+              PT_CAN_msg0x797_mux2.buf[3] =  highByte(motor11_EngineTqTargetRaw_Modified);
+              PT_CAN_msg0x797_mux2.buf[4] =  lowByte(motor11_EngineTqActual_Modified);
+              PT_CAN_msg0x797_mux2.buf[5] = highByte(motor11_EngineTqActual_Modified);
+              PT_CAN_msg0x797_mux2.buf[6] =  lowByte(motor11_EngineTqTargetFiltered_Modified);
+              PT_CAN_msg0x797_mux2.buf[7] = highByte(motor11_EngineTqTargetFiltered_Modified);
 
 
-          if (PT_CAN_canTxInterval_0x797 > 70) { // this is in millis
-                TFTCAN3.write(PT_CAN_msg0x797); //  CAN Frame for Yaw, Pitch, Roll
+          if (PT_CAN_canTxInterval_0x797 > 50 && PT_CAN_0x797_muxLevel == 1 ) { // this is in millis
+                TFTCAN3.write(PT_CAN_msg0x797_mux1); //  
+                PT_CAN_0x797_muxLevel = 2;
+                PT_CAN_canTxInterval_0x797 = 0;
+              }
+          if (PT_CAN_canTxInterval_0x797 > 50 && PT_CAN_0x797_muxLevel == 2 ) { // this is in millis
+                TFTCAN3.write(PT_CAN_msg0x797_mux2); //  
+                PT_CAN_0x797_muxLevel = 1;
                 PT_CAN_canTxInterval_0x797 = 0;
               }
 
   
+
+
+
+
+              CAN_message_t PT_CAN_msg0x798_mux1;
+              PT_CAN_msg0x798_mux1.len = 8;
+              PT_CAN_msg0x798_mux1.id = 0x798;
+              PT_CAN_msg0x798_mux1.buf[0] = 0x1;
+              PT_CAN_msg0x798_mux1.buf[1] =  lowByte(motor12_original_EngineTqPercent);
+              PT_CAN_msg0x798_mux1.buf[2] =  lowByte(motor12_original_EngineTqLimit_Stat);
+              PT_CAN_msg0x798_mux1.buf[3] = highByte(motor12_original_EngineTqLimit_Stat);
+              PT_CAN_msg0x798_mux1.buf[4] =  lowByte(motor12_original_EngineTqLimit_Dyn);
+              PT_CAN_msg0x798_mux1.buf[5] = highByte(motor12_original_EngineTqLimit_Dyn);
+              PT_CAN_msg0x798_mux1.buf[6] =  lowByte(MQB_Motor_11_0xA7_EngineTotalMomentsInertia);
+              PT_CAN_msg0x798_mux1.buf[7] = highByte(MQB_Motor_11_0xA7_EngineTotalMomentsInertia);
+
+              CAN_message_t PT_CAN_msg0x798_mux2;
+              PT_CAN_msg0x798_mux2.len = 8;
+              PT_CAN_msg0x798_mux2.id = 0x798;
+              PT_CAN_msg0x798_mux2.buf[0] = 0x2;
+              PT_CAN_msg0x798_mux2.buf[1] =  lowByte(motor12_EngineTqPercent_Modified);
+              PT_CAN_msg0x798_mux2.buf[2] =  lowByte(motor12_EngineTqLimit_Stat_Modified);
+              PT_CAN_msg0x798_mux2.buf[3] = highByte(motor12_EngineTqLimit_Stat_Modified);
+              PT_CAN_msg0x798_mux2.buf[4] =  lowByte(motor12_EngineTqLimit_Dyn_Modified);
+              PT_CAN_msg0x798_mux2.buf[5] = highByte(motor12_EngineTqLimit_Dyn_Modified);
+              PT_CAN_msg0x798_mux2.buf[6] =  lowByte(MQB_Motor_11_0xA7_EngineTqThrust);
+              PT_CAN_msg0x798_mux2.buf[7] = highByte(MQB_Motor_11_0xA7_EngineTqThrust);
+
+
+
+
+          if (PT_CAN_canTxInterval_0x798 > 50 && PT_CAN_0x797_muxLevel == 1 ) { // this is in millis
+                TFTCAN3.write(PT_CAN_msg0x797_mux1); // 
+                PT_CAN_0x797_muxLevel = 2;
+                PT_CAN_canTxInterval_0x798 = 0;
+              }
+          if (PT_CAN_canTxInterval_0x798 > 50 && PT_CAN_0x797_muxLevel == 2 ) { // this is in millis
+                TFTCAN3.write(PT_CAN_msg0x797_mux2); //  
+                PT_CAN_0x797_muxLevel = 1;
+                PT_CAN_canTxInterval_0x798 = 0;
+              }
+              
+
   
-        }
+        // }
 
 
 }
@@ -4652,25 +4759,36 @@ void loop_SerialPrinting_MITM_TCU(){
             // Serial.print("PaddleDown: "); Serial.print(Paddle_DOWN_Pulled); Serial.print("\t");
             // Serial.print("PaddlePositions: "); Serial.print(PaddlePositions); Serial.print("\t");
 
-            Serial.print("MITM_xA7_Status: "); Serial.print(MITM_TCU_EngTQ_0xA7_Status_Active_Int); Serial.print("\t");
+            // Serial.print("TqMult0x784_Int_8bit: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x784_Int_8bit); Serial.print("\t");
+            // Serial.print("TqMult0x785_Int_8bit: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Int_8bit); Serial.print("\t");
+
+            // Serial.print("MITM_xA7_Status: "); Serial.print(MITM_TCU_EngTQ_0xA7_Status_Active_Int); Serial.print("\t");
 
 
             // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
             // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
-            Serial.print("MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float); Serial.print("\t");
+            Serial.print("MITM_TQ_MultFinal: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_Final_Float); Serial.print("\t");
             // Serial.print("TqMultiplier_0x785_float: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_from_msg0x785_Float); Serial.print("\t");
-            Serial.print("MQB_Motor_11_0xA7_EngineTqActual_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqActual_0xA7); Serial.print("\t");
-            // Serial.print("mo11_ori_EngTqActual: "); Serial.print(motor11_original_EngineTqActual); Serial.print("\t");
-            // Serial.print("mo11_ori_EngTqTargetFiltered: "); Serial.print(motor11_original_EngineTqTargetFiltered); Serial.print("\t");
+            // Serial.print("mo11 0xA7_EngTqAct: "); Serial.print(MQB_Motor_11_0xA7_EngineTqActual_0xA7); Serial.print("\t");
 
-            // Serial.print("mo11_EngTqTargetRaw_Mod: "); Serial.print(motor11_EngineTqTargetRaw_Modified); Serial.print("\t");
+            // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
+            // Serial.print("MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7: "); Serial.print(MQB_Motor_11_0xA7_EngineTqTargetRaw_0xA7); Serial.print("\t");
+
+            Serial.print("mo11_ori_EngTqActual: "); Serial.print(motor11_original_EngineTqTargetRaw); Serial.print("\t");
+            Serial.print("mo11_ori_EngTqActual: "); Serial.print(motor11_original_EngineTqActual); Serial.print("\t");
+            Serial.print("mo11_ori_EngTqTgtFilt: "); Serial.print(motor11_original_EngineTqTargetFiltered); Serial.print("\t");
+
+            Serial.print("mo11_EngTqTargetRaw_Mod: "); Serial.print(motor11_EngineTqTargetRaw_Modified); Serial.print("\t");
             Serial.print("mo11_EngTqActual_Mod: "); Serial.print(motor11_EngineTqActual_Modified); Serial.print("\t");
-            // Serial.print("mo11_EngTqTargetFiltered_Mod: "); Serial.print(motor11_EngineTqTargetFiltered_Modified); Serial.print("\t");
+            Serial.print("mo11_EngTqTgtFilt_Mod: "); Serial.print(motor11_EngineTqTargetFiltered_Modified); Serial.print("\t");
+
 
             // Serial.print("g_mo11.EngineTqTargetRaw_Final: "); Serial.print(g_mo11.EngineTqTargetRaw); Serial.print("\t");
-            Serial.print("g_mo11.EngineTqActual_Final: "); Serial.print(g_mo11.EngineTqActual); Serial.print("\t");
+            // Serial.print("g_mo11.EngTqAct_Final: "); Serial.print(g_mo11.EngineTqActual); Serial.print("\t");
             // Serial.print("g_mo11.EngineTqTargetRaw_Final: "); Serial.print(g_mo11.EngineTqTargetRaw); Serial.print("\t");
-
+            // Serial.print("rampoutspeed_curDeltaPct: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_RampOutSpeed_CurrentDelta_Percentage); Serial.print("\t");
+            // Serial.print("TQred_pct: "); Serial.print(MITM_TCU_EngTQmod_TQ_Multiplier_TotalReductionPercentage); Serial.print("\t");
+            // Serial.print("WhlSpdAvg_Float "); Serial.print(WhlSpdAvg_Float); Serial.print("\t");
 
 
             // Serial.print("mo12_ori_EngTq_Neg_Available: "); Serial.print(motor12_original_EngineTq_Neg_Available); Serial.print("\t");
